@@ -70,10 +70,18 @@ def create_backup(db, reason="manual", dest_dir=None) -> Path:
     return target
 
 
+def is_backup(path) -> bool:
+    try:
+        with zipfile.ZipFile(path) as zf:
+            return "inventory.db" in zf.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 def list_backups(db) -> list:
-    files = sorted(backup_dir(db).glob(f"{PREFIX}*.zip"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
-    return files
+    """Every Zaf Inventory backup in the backup folder, whatever it is called."""
+    files = [p for p in backup_dir(db).glob("*.zip") if is_backup(p)]
+    return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def prune_backups(db):

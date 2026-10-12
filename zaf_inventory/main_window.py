@@ -7,7 +7,8 @@ from . import APP_ID, APP_NAME, __version__, backup, theme
 from .calculator import FeeCalculatorTab
 from .dashboard import Dashboard
 from .db import num
-from .dialogs import BackupDialog, GlobalSearchDialog, SettingsDialog
+from .dialogs import (BackupDialog, GlobalSearchDialog, SettingsDialog, choose_backup_file,
+                      restore_with_prompt)
 from .paths import data_dir, is_portable
 from .sheets import SheetsTab
 from .views import ActivityTab, InventoryTab
@@ -18,6 +19,7 @@ SHORTCUTS = """
 <b>Ctrl+M</b> Notes &amp; photos &nbsp; <b>Ctrl+S</b> Mark as sold<br>
 <b>Ctrl+U</b> Use part on device &nbsp; <b>Ctrl+D</b> Duplicate<br>
 <b>Ctrl+F</b> Search this tab &nbsp; <b>Ctrl+K</b> Search everything<br>
+<b>Ctrl+Shift+I</b> Import backup .zip<br>
 <b>Ctrl+B</b> Back up now &nbsp; <b>F5</b> Refresh &nbsp; <b>Ctrl+1..8</b> Switch tab<br>
 <b>Ctrl+C</b> Copy selected rows (paste into Excel / Sheets)<br>
 Right-click a column heading to show / hide columns.
@@ -102,6 +104,8 @@ class MainWindow(QMainWindow):
                                   "Search every tab, notes included")
         self.a_backup = self._act("Back Up", self.backup_now, "Ctrl+B", "Back up now")
         self.a_backups = self._act("Backup && Restore...", self.open_backups)
+        self.a_import_backup = self._act("Import Backup (.zip)...", self.import_backup,
+                                         "Ctrl+Shift+I", "Load a backup / import zip")
         self.a_settings = self._act("Settings", self.open_settings, "Ctrl+,")
         self.a_export = self._act("Export CSV...", t("export_csv"), "Ctrl+E")
         self.a_import = self._act("Import CSV...", t("import_csv"), "Ctrl+I")
@@ -123,6 +127,7 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()
         m = mb.addMenu("&File")
+        m.addAction(self.a_import_backup)
         m.addAction(self.a_import)
         m.addAction(self.a_export)
         m.addSeparator()
@@ -293,6 +298,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Automatic backup complete.", 5000)
         except Exception as exc:
             self.statusBar().showMessage(f"Automatic backup failed: {exc}", 15000)
+
+    def import_backup(self):
+        path = choose_backup_file(self, self.db)
+        if path and restore_with_prompt(self, self.db, path):
+            self.refresh_all()
 
     def open_backups(self):
         dlg = BackupDialog(self.db, self)

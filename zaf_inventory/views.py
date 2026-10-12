@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
 
 from . import APP_ID, theme
 from .db import device_title, num, part_title, split_faults
-from .dialogs import (ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog)
+from .dialogs import (ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog,
+                      restore_with_prompt)
 from .fields import (DEVICE_FIELDS, DEVICE_STATUSES, EXCLUDED_SALE_STATUSES, NUMERIC_KINDS,
                      PART_FIELDS, PART_STATUSES, SALE_FIELDS)
 from .widgets import fmt_date, fmt_ts, money
@@ -655,8 +656,14 @@ class InventoryTab(QWidget):
             QMessageBox.information(self, "Import", "Import is available for Working Phones, "
                                                     "Faulty and Parts.")
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Import CSV", "", "CSV files (*.csv)")
+        path, _ = QFileDialog.getOpenFileName(self, "Import", "",
+                                              "CSV or backup (*.csv *.zip);;CSV files (*.csv);;"
+                                              "Zaf Inventory backup (*.zip)")
         if not path:
+            return
+        if path.lower().endswith(".zip"):
+            if restore_with_prompt(self, self.db, path):
+                self._done("Backup restored.")
             return
         fields = DEVICE_FIELDS if self.table_name == "devices" else PART_FIELDS
         lookup = {}

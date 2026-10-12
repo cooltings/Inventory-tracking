@@ -604,6 +604,41 @@ class SettingsDialog(QDialog):
 
 
 # ============================================================================ backups
+def restore_with_prompt(parent, db, path) -> bool:
+    """Confirm, restore a backup zip and report the result. True if data was replaced."""
+    if QMessageBox.warning(
+            parent, "Restore Backup",
+            f"Replace ALL current data with the backup:\n{Path(path).name}\n\n"
+            "A safety backup of your current data is taken first, so this can be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+        return False
+    try:
+        safety = backup.restore_backup(db, path)
+    except Exception as exc:
+        import traceback
+        from .paths import data_dir
+        try:
+            with open(data_dir() / "error.log", "a", encoding="utf-8") as fh:
+                fh.write(f"Restore of {path} failed:\n{traceback.format_exc()}\n")
+        except OSError:
+            pass
+        QMessageBox.critical(parent, "Restore Failed",
+                             f"Could not restore {Path(path).name}:\n\n{exc}\n\n"
+                             "Your current data has not been changed. Details are in "
+                             "error.log in the data folder.")
+        return False
+    QMessageBox.information(parent, "Restore Complete",
+                            f"Data restored from {Path(path).name}.\n\n"
+                            f"Your previous data was saved as:\n{safety.name}")
+    return True
+
+
+def choose_backup_file(parent, db):
+    path, _ = QFileDialog.getOpenFileName(parent, "Import Backup", str(Path.home() / "Downloads"),
+                                          "Zaf Inventory backup (*.zip);;All files (*)")
+    return path
+
+
 class BackupDialog(QDialog):
     restored = Signal()
 
@@ -698,21 +733,9 @@ class BackupDialog(QDialog):
             QMessageBox.critical(self, "Backup Problem", str(exc))
 
     def _restore(self, path):
-        if QMessageBox.warning(
-                self, "Restore Backup",
-                f"Replace ALL current data with the backup:\n{Path(path).name}\n\n"
-                "A safety backup of your current data is taken first, so this can be undone.",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
-            return
-        try:
-            safety = backup.restore_backup(self.db, path)
-        except Exception as exc:
-            QMessageBox.critical(self, "Restore Failed", str(exc))
-            return
-        self.reload()
-        self.restored.emit()
-        QMessageBox.information(self, "Restore Complete",
-                                f"Data restored.\n\nYour previous data was saved as:\n{safety.name}")
+        if restore_with_prompt(self, self.db, path):
+            self.reload()
+            self.restored.emit()
 
     def _restore_selected(self):
         p = self._selected()
@@ -720,8 +743,7 @@ class BackupDialog(QDialog):
             self._restore(p)
 
     def _restore_file(self):
-        f, _ = QFileDialog.getOpenFileName(self, "Choose Backup", str(backup.backup_dir(self.db)),
-                                           "Zaf Inventory backup (*.zip)")
+        f = choose_backup_file(self, self.db)
         if f:
             self._restore(f)
 
