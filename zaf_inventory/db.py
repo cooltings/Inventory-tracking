@@ -581,10 +581,13 @@ class Database:
         month_start = today.replace(day=1).isoformat()
         year_start = today.replace(month=1, day=1).isoformat()
 
-        def sales_between(start, end=None):
+        def sales_between(start=None, end=None):
             q = f"""SELECT COUNT(*) n, COALESCE(SUM(sale_price+COALESCE(postage_charged,0)),0) revenue,
-                           COALESCE(SUM(profit),0) profit FROM sales WHERE {valid} AND sale_date >= ?"""
-            params = [start]
+                           COALESCE(SUM(profit),0) profit FROM sales WHERE {valid}"""
+            params = []
+            if start:  # undated sales only count towards all-time totals
+                q += " AND sale_date >= ?"
+                params.append(start)
             if end:
                 q += " AND sale_date < ?"
                 params.append(end)
@@ -592,7 +595,7 @@ class Database:
 
         out["month"] = sales_between(month_start)
         out["year"] = sales_between(year_start)
-        out["all"] = sales_between("0000-01-01")
+        out["all"] = sales_between()
         out["last30"] = sales_between((today - dt.timedelta(days=30)).isoformat())
 
         months = []
