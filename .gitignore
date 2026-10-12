@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.spec
+app.ico
+app.png
+data/
+portable.txt
+.DS_Store

@@ -1,0 +1,126 @@
+name: Build & Release
+
+# Push a tag like v1.0.0 to build Windows, macOS and Linux apps and publish them
+# as a GitHub Release. "Run workflow" on the Actions tab builds without releasing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: ZafInventory-Windows-x64.zip
+          - os: macos-latest
+            asset: ZafInventory-macOS-AppleSilicon.zip
+          - os: macos-15-intel
+            asset: ZafInventory-macOS-Intel.zip
+          - os: ubuntu-22.04
+            asset: ZafInventory-Linux-x64.tar.gz
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libfontconfig1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller pillow
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          export ZAF_DATA_DIR="$RUNNER_TEMP/zafdata"
+          python - <<'EOF'
+          from PySide6.QtWidgets import QApplication
+          from zaf_inventory.db import Database
+          from zaf_inventory.paths import db_path
+          from zaf_inventory.main_window import MainWindow
+          from zaf_inventory import backup
+          app = QApplication([])
+          db = Database(db_path())
+          w = MainWindow(db)
+          for i in range(w.tabs.count()):
+              w.tabs.setCurrentIndex(i)
+          backup.verify_backup(backup.create_backup(db, "manual"))
+          print("smoke test ok")
+          EOF
+
+      - name: Make icon
+        run: python tools/make_icon.py
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --clean --windowed --name ZafInventory --icon app.ico `
+            --exclude-module tkinter main.py
+          Compress-Archive -Path dist/ZafInventory -DestinationPath ${{ matrix.asset }}
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --clean --windowed --name ZafInventory --icon app.png \
+            --osx-bundle-identifier com.zafinventory.app --exclude-module tkinter main.py
+          ditto -c -k --keepParent dist/ZafInventory.app ${{ matrix.asset }}
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconfirm --clean --windowed --name ZafInventory \
+            --exclude-module tkinter main.py
+          tar -czf ${{ matrix.asset }} -C dist ZafInventory
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          body: |
+            ## Downloads
+            | Platform | File |
+            |---|---|
+            | **Windows 10/11** | `ZafInventory-Windows-x64.zip`: unzip, then run `ZafInventory.exe` |
+            | **macOS (M1/M2/M3/M4)** | `ZafInventory-macOS-AppleSilicon.zip` |
+            | **macOS (Intel)** | `ZafInventory-macOS-Intel.zip` |
+            | **Linux** | `ZafInventory-Linux-x64.tar.gz`: extract, then run `ZafInventory/ZafInventory` |
+
+            **First launch:** these builds aren't code-signed.
+            - **Windows:** SmartScreen may say "Windows protected your PC". Click **More info**, then **Run anyway**.
+            - **macOS:** right-click the app, choose **Open**, then **Open** again.
+
+            **Portable mode:** create an empty `portable.txt` next to the app. Data is then kept in a `data` folder beside it.
+            Otherwise, data lives in `%APPDATA%\ZafInventory` on Windows, `~/Library/Application Support/ZafInventory` on macOS, or `~/.local/share/ZafInventory` on Linux.
+            Upgrading never touches your data. Just replace the app folder.
