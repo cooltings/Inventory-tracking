@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from .fields import (DEFAULT_LISTS, DEVICE_FIELDS, EXCLUDED_SALE_STATUSES,
-                     PART_FIELDS, SALE_FIELDS, SQL_TYPES)
+                     PART_FIELDS, SALE_FIELDS, SQL_TYPES, WRITTEN_OFF)
 
 DEFAULT_SETTINGS = {
     "currency": "£",
@@ -248,6 +248,7 @@ class Database:
             r["age_days"] = _age_days(r.get("purchase_date") or r.get("created_at"), today)
             r["est_profit"] = round(num(r.get("list_price")) - r["total_cost"], 2) \
                 if r.get("list_price") else None
+            r["written_off"] = r.get("status") == WRITTEN_OFF
         return rows
 
     def list_parts(self):
@@ -255,7 +256,8 @@ class Database:
         for r in rows:
             qty = int(num(r.get("quantity")))
             r["stock_value"] = round(qty * num(r.get("unit_cost")), 2)
-            r["low_stock"] = qty <= int(num(r.get("min_qty"), 0))
+            r["written_off"] = r.get("status") == WRITTEN_OFF
+            r["low_stock"] = not r["written_off"] and qty <= int(num(r.get("min_qty"), 0))
         return rows
 
     def list_sales(self):
@@ -437,6 +439,17 @@ class Database:
                      f"{qty} x {part.get('sku')} into {device.get('sku')}", commit=False)
         return cost
 
+    def write_off(self, table, row_id, reason=""):
+        """Mark a device or part as written off, keeping it on record with a note."""
+        entity = "device" if table == "devices" else "part"
+        item = self.get(table, row_id)
+        with self.conn:
+            self.update(table, row_id, {"status": WRITTEN_OFF}, commit=False)
+            self.add_note(entity, row_id, "Written off" + (f": {reason}" if reason else "."),
+                          commit=False)
+            self.log(WRITTEN_OFF, entity, row_id,
+                     f"{item.get('sku')}" + (f" - {reason}" if reason else ""), commit=False)
+
     def move_device(self, device_id, category):
         device = self.get("devices", device_id)
         status = device.get("status")
@@ -564,16 +577,25 @@ class Database:
             r = c.execute("""SELECT COALESCE(SUM(COALESCE(quantity,1)),0) n,
                                     COALESCE(SUM(COALESCE(quantity,1)*(COALESCE(purchase_price,0)+COALESCE(repair_cost,0))),0) cost,
                                     COALESCE(SUM(COALESCE(quantity,1)*COALESCE(list_price,0)),0) listv
-                             FROM devices WHERE category=? AND COALESCE(status,'')!='Sold'""",
-                          (cat,)).fetchone()
+                             FROM devices WHERE category=? AND COALESCE(status,'') NOT IN ('Sold', ?)""",
+                          (cat, WRITTEN_OFF)).fetchone()
             out[cat] = dict(r)
         r = c.execute("""SELECT COUNT(*) lines, COALESCE(SUM(quantity),0) qty,
                                 COALESCE(SUM(quantity*unit_cost),0) cost,
-                                COALESCE(SUM(quantity*list_price),0) listv FROM parts""").fetchone()
+                                COALESCE(SUM(quantity*list_price),0) listv FROM parts
+                         WHERE COALESCE(status,'') != ?""", (WRITTEN_OFF,)).fetchone()
         out["parts"] = dict(r)
         out["low_stock"] = [dict(x) for x in c.execute(
             "SELECT * FROM parts WHERE COALESCE(quantity,0) <= COALESCE(min_qty,0) "
-            "AND COALESCE(min_qty,0) > 0 ORDER BY quantity LIMIT 50")]
+            "AND COALESCE(min_qty,0) > 0 AND COALESCE(status,'') != ? ORDER BY quantity LIMIT 50",
+            (WRITTEN_OFF,))]
+        d = c.execute("""SELECT COALESCE(SUM(COALESCE(quantity,1)),0) n,
+                                COALESCE(SUM(COALESCE(quantity,1)*(COALESCE(purchase_price,0)+COALESCE(repair_cost,0))),0) cost
+                         FROM devices WHERE status=?""", (WRITTEN_OFF,)).fetchone()
+        p = c.execute("""SELECT COALESCE(SUM(quantity),0) n, COALESCE(SUM(quantity*unit_cost),0) cost
+                         FROM parts WHERE status=?""", (WRITTEN_OFF,)).fetchone()
+        out["written_off"] = {"devices": d["n"], "parts": p["n"],
+                              "cost": round(d["cost"] + p["cost"], 2)}
 
         excl = ",".join(f"'{s}'" for s in EXCLUDED_SALE_STATUSES)
         valid = f"COALESCE(status,'') NOT IN ({excl})"
@@ -627,9 +649,9 @@ class Database:
 
         cutoff = (today - dt.timedelta(days=aged)).isoformat()
         out["aged"] = [dict(x) for x in c.execute("""
-            SELECT * FROM devices WHERE COALESCE(status,'')!='Sold'
+            SELECT * FROM devices WHERE COALESCE(status,'') NOT IN ('Sold', ?)
             AND COALESCE(purchase_date, substr(created_at,1,10)) <= ?
-            ORDER BY COALESCE(purchase_date, created_at) LIMIT 50""", (cutoff,))]
+            ORDER BY COALESCE(purchase_date, created_at) LIMIT 50""", (WRITTEN_OFF, cutoff))]
         out["aged_days"] = aged
         return out
 

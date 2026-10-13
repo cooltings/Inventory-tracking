@@ -188,7 +188,11 @@ class Dashboard(QWidget):
         self.cards["parts"].set(str(int(s["parts"]["qty"])),
                                 f"{s['parts']['lines']} lines  ·  {len(s['low_stock'])} low stock")
         total = s["working"]["cost"] + s["faulty"]["cost"] + s["parts"]["cost"]
-        self.cards["stock_value"].set(money(total), "Phones + faulty + parts")
+        wo = s["written_off"]
+        sub = "Phones + faulty + parts"
+        if wo["cost"] or wo["devices"] or wo["parts"]:
+            sub += f"  ·  {money(wo['cost'])} written off"
+        self.cards["stock_value"].set(money(total), sub)
         for key in ("month", "year", "all"):
             d = s[key]
             margin = f"  ·  {d['profit'] / d['revenue'] * 100:.0f}% margin" if d["revenue"] else ""

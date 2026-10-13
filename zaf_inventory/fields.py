@@ -31,11 +31,13 @@ GRADES = ("Brand New", "Like New", "A - Excellent", "B - Good", "C - Fair",
 NETWORKS = ("Unlocked", "EE", "O2", "Vodafone", "Three", "Tesco Mobile",
             "giffgaff", "Sky", "Other / Locked", "Unknown")
 STORAGE = ("8GB", "16GB", "32GB", "64GB", "128GB", "256GB", "512GB", "1TB", "2TB")
+# Written-off items stay on record but are left out of stock counts and values.
+WRITTEN_OFF = "Written Off"
 DEVICE_STATUSES = ("In Stock", "Listed", "Reserved", "Awaiting Repair",
-                   "In Repair", "On Hold")
+                   "In Repair", "On Hold", WRITTEN_OFF)
 PART_CONDITIONS = ("New - Genuine", "New - Aftermarket", "Used - Pulled",
                    "Refurbished", "Faulty / Untested")
-PART_STATUSES = ("In Stock", "Listed", "Reserved")
+PART_STATUSES = ("In Stock", "Listed", "Reserved", WRITTEN_OFF)
 SALE_STATUSES = ("Awaiting Payment", "Paid", "Shipped", "Delivered", "Completed",
                  "Returned", "Refunded", "Cancelled")
 # sales in these states are left out of revenue / profit totals

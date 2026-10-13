@@ -65,8 +65,10 @@ jobs:
           print("smoke test ok")
           EOF
 
-      - name: Backup / restore test
-        run: python tests/test_backup_restore.py
+      - name: Backup / restore and write-off tests
+        run: |
+          python tests/test_backup_restore.py
+          python tests/test_written_off.py
 
       - name: Make icon
         run: python tools/make_icon.py

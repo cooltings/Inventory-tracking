@@ -6,7 +6,8 @@ from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSettings, QSortFi
                             Qt, Signal)
 from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog,
-                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu,
+                               QMessageBox,
                                QPushButton, QTableView, QVBoxLayout, QWidget)
 
 from . import APP_ID, theme
@@ -14,7 +15,7 @@ from .db import device_title, num, part_title, split_faults
 from .dialogs import (ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog,
                       restore_with_prompt)
 from .fields import (DEVICE_FIELDS, DEVICE_STATUSES, EXCLUDED_SALE_STATUSES, NUMERIC_KINDS,
-                     PART_FIELDS, PART_STATUSES, SALE_FIELDS)
+                     PART_FIELDS, PART_STATUSES, SALE_FIELDS, WRITTEN_OFF)
 from .widgets import fmt_date, fmt_ts, money
 
 NUMERIC = NUMERIC_KINDS | {"pct1", "notes", "days"}
@@ -165,7 +166,7 @@ class RowsModel(QAbstractTableModel):
             return None
         if role == Qt.ForegroundRole:
             c = theme.current
-            if row.get("excluded"):
+            if row.get("excluded") or row.get("written_off"):
                 return QColor(c["muted"])
             if key in ("profit", "est_profit", "running_profit", "margin") and v not in (None, ""):
                 return QColor(c["good"] if num(v) >= 0 else c["bad"])
@@ -181,7 +182,7 @@ class RowsModel(QAbstractTableModel):
             if key == "status" and v in EXCLUDED_SALE_STATUSES:
                 return QColor(c["bad_bg"])
             return None
-        if role == Qt.FontRole and row.get("excluded"):
+        if role == Qt.FontRole and (row.get("excluded") or row.get("written_off")):
             f = QFont()
             f.setStrikeOut(True)
             return f
@@ -377,6 +378,8 @@ class InventoryTab(QWidget):
         rows = self.visible_rows()
         total = len(self.model.rows)
         shown = f"{len(rows)} of {total} shown" if len(rows) != total else f"{total} lines"
+        written_off = [r for r in rows if r.get("written_off")]
+        rows = [r for r in rows if not r.get("written_off")]
         if self.kind in ("working", "faulty"):
             units = sum(int(num(r.get("quantity"), 1)) for r in rows)
             cost = sum(r["total_cost"] * int(num(r.get("quantity"), 1)) for r in rows)
@@ -392,6 +395,12 @@ class InventoryTab(QWidget):
             text = f"{shown}   ·   {units} units   ·   Stock value {money(value)}"
             if low:
                 text += f"   ·   {low} low stock"
+        if self.kind in ("working", "faulty", "parts") and written_off:
+            if self.kind == "parts":
+                lost = sum(r["stock_value"] for r in written_off)
+            else:
+                lost = sum(r["total_cost"] * int(num(r.get("quantity"), 1)) for r in written_off)
+            text += f"   ·   {len(written_off)} written off ({money(lost)}, not counted)"
         else:
             valid = [r for r in rows if not r.get("excluded")]
             revenue = sum(num(r.get("sale_price")) + num(r.get("postage_charged")) for r in valid)
@@ -605,6 +614,20 @@ class InventoryTab(QWidget):
             self.db.log("Status", self.entity, r["id"], f"{r.get('sku')} -> {status}")
         self._done(f"{len(rows)} item(s) set to {status}.")
 
+    def write_off(self):
+        rows = [r for r in self.selected() if r.get("status") != WRITTEN_OFF]
+        if not rows or self.kind == "sales":
+            return
+        names = ", ".join(r.get("sku") or "" for r in rows[:6]) + (" ..." if len(rows) > 6 else "")
+        reason, ok = QInputDialog.getText(
+            self, "Write Off", f"Write off {len(rows)} item(s): {names}\n\n"
+            "They stay on record but no longer count as stock.\nReason (optional):")
+        if not ok:
+            return
+        for r in rows:
+            self.db.write_off(self.table_name, r["id"], reason.strip())
+        self._done(f"Wrote off {len(rows)} item(s).")
+
     def copy_title(self):
         r = self.current()
         if r:
@@ -741,6 +764,7 @@ class InventoryTab(QWidget):
                 menu.addAction("Use Part From Stock...", self.use_part)
                 menu.addAction("Move to Faulty / Repairs" if self.kind == "working"
                                else "Move to Working Phones (repaired)", self.move)
+            menu.addAction("Write Off...", self.write_off)
             status_menu = menu.addMenu("Set Status")
             for s in (DEVICE_STATUSES if self.table_name == "devices" else PART_STATUSES):
                 status_menu.addAction(s, lambda s=s: self.set_status(s))

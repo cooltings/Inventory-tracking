@@ -97,6 +97,8 @@ class MainWindow(QMainWindow):
         self.a_return = self._act("Return/Refund", t("return_sale"), None,
                                   "Mark a sale returned / refunded")
         self.a_dup = self._act("Duplicate", t("duplicate"), "Ctrl+D")
+        self.a_writeoff = self._act("Write Off...", t("write_off"), None,
+                                    "Write off the selected items (kept on record, not counted)")
         self.a_delete = self._act("Delete", t("delete"), None, "Delete the selected items")
         self.a_calc = self._act("Calculate", self._send_to_calc, None,
                                 "Open the fee calculator with this item's cost and price")
@@ -144,7 +146,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_settings)
         m = mb.addMenu("&Item")
-        for a in (self.a_notes, self.a_sell, self.a_part, self.a_move, self.a_return, self.a_calc):
+        for a in (self.a_notes, self.a_sell, self.a_part, self.a_move, self.a_return, self.a_calc,
+                  self.a_writeoff):
             m.addAction(a)
         m = mb.addMenu("&View")
         m.addAction(self.a_search)
@@ -179,6 +182,7 @@ class MainWindow(QMainWindow):
         self.a_export.setEnabled(inv or tab is self.sheets)
         self.a_sell.setEnabled(inv and kind != "sales")
         self.a_dup.setEnabled(inv and kind != "sales")
+        self.a_writeoff.setEnabled(inv and kind != "sales")
         self.a_part.setEnabled(devices)
         self.a_move.setEnabled(devices)
         self.a_move.setText("Move to Faulty" if kind == "working" else "Move to Working")

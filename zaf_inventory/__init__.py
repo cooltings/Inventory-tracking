@@ -2,4 +2,4 @@
 
 APP_NAME = "Zaf Inventory"
 APP_ID = "ZafInventory"
-__version__ = "1.0.2"
+__version__ = "1.0.3"

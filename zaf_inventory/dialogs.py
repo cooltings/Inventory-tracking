@@ -437,7 +437,8 @@ class UsePartDialog(QDialog):
         row.addWidget(cancel)
         row.addWidget(ok)
         lay.addLayout(row)
-        self.parts = [p for p in db.list_parts() if int(num(p.get("quantity"))) > 0]
+        self.parts = [p for p in db.list_parts()
+                      if int(num(p.get("quantity"))) > 0 and not p["written_off"]]
         self._fill()
         if self.table.rowCount() == 0:
             self.search.clear()

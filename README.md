@@ -44,6 +44,10 @@ On macOS or Linux, run `./build_mac_linux.sh`, or run from source with `pip inst
 | **Fee Calculator** | Takes sale price, P&P, item cost, postage and other costs, plus fee %, fixed fee and promoted %. It works out profit or loss, margin, ROI, the break-even price and the price you'd need for a target profit. |
 | **Activity Log** | Records every add, edit, sale, move, return and restore. |
 
+**Write-offs:** right-click an item and choose **Write Off...** (or set its status to *Written Off*).
+It stays on record with your reason as a note, greyed out, but is no longer counted in stock totals or
+stock value. The dashboard shows the total written off, and you can set it back to *In Stock* at any time.
+
 **On every item**
 - Notes with timestamps (a full history, not a single box) and photos (you can drag and drop them in).
 - An IMEI checksum check and a warning if the same IMEI is already in stock.
