@@ -30,6 +30,7 @@ GRADES = ("Brand New", "Like New", "A - Excellent", "B - Good", "C - Fair",
           "D - Poor", "For Parts / Not Working")
 NETWORKS = ("Unlocked", "EE", "O2", "Vodafone", "Three", "Tesco Mobile",
             "giffgaff", "Sky", "Other / Locked", "Unknown")
+RAM = ("1GB", "2GB", "3GB", "4GB", "6GB", "8GB", "12GB", "16GB")
 STORAGE = ("8GB", "16GB", "32GB", "64GB", "128GB", "256GB", "512GB", "1TB", "2TB")
 # Written-off items stay on record but are left out of stock counts and values.
 WRITTEN_OFF = "Written Off"
@@ -76,7 +77,9 @@ DEVICE_FIELDS = [
     Field("sku", "SKU", "readonly"),
     Field("brand", "Brand", "combo", suggest="brands", required=True),
     Field("model", "Model", "combo", required=True, tip="e.g. iPhone 12 Pro"),
+    Field("model_number", "Model No.", "text", column=False, tip="e.g. A2403 or SM-G991B"),
     Field("storage", "Storage", "combo", options=STORAGE),
+    Field("ram", "RAM", "combo", options=RAM, column=False),
     Field("colour", "Colour", "combo"),
     Field("imei", "IMEI", "text", tip="15 digit IMEI (*#06#)"),
     Field("serial", "Serial No.", "text"),
@@ -84,6 +87,9 @@ DEVICE_FIELDS = [
     Field("network", "Network", "choice", options=NETWORKS),
     Field("grade", "Grade", "choice", options=GRADES),
     Field("battery_health", "Battery %", "percent"),
+    Field("battery_cycles", "Battery Cycles", "int", column=False,
+          tip="Charge cycle count, 0 if unknown"),
+    Field("os_version", "OS Version", "text", column=False, tip="e.g. iOS 17.5 or Android 14"),
     Field("faults", "Faults", "faults"),
     Field("status", "Status", "choice", options=DEVICE_STATUSES),
     Field("location", "Location", "combo", suggest="locations"),
@@ -97,6 +103,8 @@ DEVICE_FIELDS = [
           tip="Box, charger, case..."),
     Field("description", "Description", "multiline", column=False,
           tip="Listing description / condition details"),
+    Field("cosmetic_notes", "Cosmetic Notes", "multiline", column=False,
+          tip="Scratches, dents, marks: shown on the test report"),
 ]
 
 # --------------------------------------------------------------------------- parts

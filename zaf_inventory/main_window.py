@@ -17,6 +17,7 @@ from .widgets import UI, fmt_ts
 SHORTCUTS = """
 <b>Ctrl+N</b> Add item &nbsp; <b>Enter</b> Edit &nbsp; <b>Del</b> Delete<br>
 <b>Ctrl+M</b> Notes &amp; photos &nbsp; <b>Ctrl+S</b> Mark as sold<br>
+<b>Ctrl+T</b> Test device &nbsp; <b>Ctrl+R</b> Test report PDF<br>
 <b>Ctrl+U</b> Use part on device &nbsp; <b>Ctrl+D</b> Duplicate<br>
 <b>Ctrl+F</b> Search this tab &nbsp; <b>Ctrl+K</b> Search everything<br>
 <b>Ctrl+Shift+I</b> Import backup .zip<br>
@@ -91,6 +92,10 @@ class MainWindow(QMainWindow):
         self.a_add = self._act("Add", t("add"), "Ctrl+N", "Add a new item")
         self.a_edit = self._act("Edit", t("edit"), None, "Edit the selected item")
         self.a_notes = self._act("Notes", t("notes"), "Ctrl+M", "Notes & photos for the item")
+        self.a_test = self._act("Test", t("test_device"), "Ctrl+T",
+                                "Run the test checklist on this phone")
+        self.a_report = self._act("Test Report", t("test_report"), "Ctrl+R",
+                                  "Create a PDF test report for this phone")
         self.a_sell = self._act("Mark Sold", t("sell"), "Ctrl+S", "Record a sale for this item")
         self.a_part = self._act("Use Part", t("use_part"), "Ctrl+U", "Fit a part from stock")
         self.a_move = self._act("Move", t("move"), None, "Move between Working and Faulty")
@@ -120,7 +125,8 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.addToolBar(tb)
-        for a in (self.a_add, self.a_edit, self.a_notes, self.a_sell, self.a_part, self.a_move,
+        for a in (self.a_add, self.a_edit, self.a_notes, self.a_test, self.a_report, self.a_sell,
+                  self.a_part, self.a_move,
                   self.a_return, self.a_calc, self.a_delete):
             tb.addAction(a)
         tb.addSeparator()
@@ -146,8 +152,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_settings)
         m = mb.addMenu("&Item")
-        for a in (self.a_notes, self.a_sell, self.a_part, self.a_move, self.a_return, self.a_calc,
-                  self.a_writeoff):
+        for a in (self.a_notes, self.a_test, self.a_report, self.a_sell, self.a_part, self.a_move,
+                  self.a_return, self.a_calc, self.a_writeoff):
             m.addAction(a)
         m = mb.addMenu("&View")
         m.addAction(self.a_search)
@@ -184,6 +190,8 @@ class MainWindow(QMainWindow):
         self.a_dup.setEnabled(inv and kind != "sales")
         self.a_writeoff.setEnabled(inv and kind != "sales")
         self.a_part.setEnabled(devices)
+        self.a_test.setEnabled(devices)
+        self.a_report.setEnabled(devices)
         self.a_move.setEnabled(devices)
         self.a_move.setText("Move to Faulty" if kind == "working" else "Move to Working")
         self.a_return.setEnabled(kind == "sales")

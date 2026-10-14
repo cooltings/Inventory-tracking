@@ -86,4 +86,14 @@ db.update("devices", 3, {"status": "In Stock"})
 backup.restore_backup(db, zip_path)
 assert db.get("devices", 3)["status"] == WRITTEN_OFF
 
+# --- the summary line on every tab, with nothing written off in view (regression)
+db.update("devices", 3, {"status": "In Stock"})
+db.update("parts", 2, {"status": "In Stock"})
+for kind, expect in (("working", "units"), ("faulty", "units"), ("parts", "Stock value"),
+                     ("sales", "Revenue")):
+    text = InventoryTab(db, kind).summary.text()
+    assert expect in text, f"{kind}: {text}"
+    assert ("Revenue" in text) == (kind == "sales"), f"{kind} shows the wrong summary: {text}"
+    assert "written off" not in text, f"{kind}: {text}"
+
 print("written-off test passed")

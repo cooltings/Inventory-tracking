@@ -44,6 +44,14 @@ On macOS or Linux, run `./build_mac_linux.sh`, or run from source with `pip inst
 | **Fee Calculator** | Takes sale price, P&P, item cost, postage and other costs, plus fee %, fixed fee and promoted %. It works out profit or loss, margin, ROI, the break-even price and the price you'd need for a target profit. |
 | **Activity Log** | Records every add, edit, sale, move, return and restore. |
 
+**Device testing and PDF test reports:** select a phone and press **Ctrl+T** (or **Test** in the toolbar).
+- The checklist has 93 tests in 10 sections: power and charging, display and touch, cameras, audio, network and connectivity, sensors and haptics, buttons and ports, software and security, cosmetic and physical, and accessories.
+- Each test is **Pass**, **Fail** or **N/A**, with a note. Click the buttons, or select a row and press **P** / **F** / **N**. Failing a test takes you straight to its note.
+- **Auto N/A** marks features the phone can't have (for example the iCloud lock on an Android phone, or the FRP lock on an iPhone). You can also add your own tests with **Add Custom Test**, and filter to show only what's still untested or failed.
+- The **Device details** tab holds brand, model, model number, colour, storage, RAM, IMEI, serial number, network, OS version, battery health and cycles, cosmetic condition and cosmetic notes, plus who tested it and when.
+- **Generate PDF Report** (or **Ctrl+R** from the phone list) creates a printable report with all of that, an overall verdict, the failed items and their notes up front, then every test colour-coded with its notes.
+- Everything saves as you go. The **Tests** column in the phone list shows progress and any failures. Set your business name for the report header in Settings.
+
 **Write-offs:** right-click an item and choose **Write Off...** (or set its status to *Written Off*).
 It stays on record with your reason as a note, greyed out, but is no longer counted in stock totals or
 stock value. The dashboard shows the total written off, and you can set it back to *In Stock* at any time.

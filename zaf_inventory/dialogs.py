@@ -517,7 +517,13 @@ class SettingsDialog(QDialog):
         self.platform = QComboBox(editable=True)
         self.platform.addItems(db.get_list("platforms"))
         self.platform.setCurrentText(db.setting("default_platform"))
+        self.business = QLineEdit(db.setting("report_business"))
+        self.business.setPlaceholderText("Shown at the top of PDF test reports")
+        self.tester = QLineEdit(db.setting("tester_name"))
+        self.tester.setPlaceholderText("Pre-filled as 'Tested by' on test reports")
         f.addRow("Currency symbol", self.currency)
+        f.addRow("Business name on reports", self.business)
+        f.addRow("Default tester name", self.tester)
         f.addRow("Theme", self.theme)
         f.addRow("Flag stock as aged after", self.aged)
         f.addRow("Selling fee (percentage)", self.fee_pct)
@@ -588,6 +594,8 @@ class SettingsDialog(QDialog):
     def _save(self):
         db = self.db
         db.set_setting("currency", self.currency.text().strip() or "£")
+        db.set_setting("report_business", self.business.text().strip())
+        db.set_setting("tester_name", self.tester.text().strip())
         db.set_setting("theme", self.theme.currentText())
         db.set_setting("aged_days", self.aged.value())
         db.set_setting("fee_percent", self.fee_pct.value())

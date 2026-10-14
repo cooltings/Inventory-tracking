@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
 
 from . import APP_ID, theme
 from .db import device_title, num, part_title, split_faults
+from .device_test import TestDialog, export_report
 from .dialogs import (ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog,
                       restore_with_prompt)
 from .fields import (DEVICE_FIELDS, DEVICE_STATUSES, EXCLUDED_SALE_STATUSES, NUMERIC_KINDS,
@@ -23,6 +24,9 @@ NUMERIC = NUMERIC_KINDS | {"pct1", "notes", "days"}
 
 def _columns(fields, extras, drop=()):
     cols = [(f.key, f.label, f.kind) for f in fields if f.kind != "multiline" and f.key not in drop]
+    if any(e[0] == "total_cost" for e in extras):  # device tabs: test result sits beside Status
+        at = next(i for i, c in enumerate(cols) if c[0] == "status") + 1
+        cols.insert(at, ("test_summary", "Tests", "text"))
     return cols + extras
 
 
@@ -35,7 +39,7 @@ TAB_CONFIG = {
                                             ("photo_count", "Photos", "int"),
                                             ("note_count", "Notes", "notes")]),
         "hidden": {"accessories", "ebay_item_id", "source", "repair_cost", "photo_count",
-                   "purchase_date"},
+                   "purchase_date", "model_number", "ram", "battery_cycles", "os_version"},
         "filters": [("brand", "Brands"), ("model", "Models"), ("storage", "Storage"),
                     ("grade", "Grades"), ("network", "Networks"), ("faults", "Faults"),
                     ("status", "Statuses"), ("location", "Locations")],
@@ -48,7 +52,8 @@ TAB_CONFIG = {
                                             ("photo_count", "Photos", "int"),
                                             ("note_count", "Notes", "notes")]),
         "hidden": {"accessories", "ebay_item_id", "source", "battery_health", "photo_count",
-                   "purchase_date", "est_profit"},
+                   "purchase_date", "est_profit", "model_number", "ram", "battery_cycles",
+                   "os_version", "test_summary"},
         "filters": [("brand", "Brands"), ("model", "Models"), ("faults", "Faults"),
                     ("status", "Statuses"), ("grade", "Grades"), ("network", "Networks"),
                     ("location", "Locations")],
@@ -172,6 +177,10 @@ class RowsModel(QAbstractTableModel):
                 return QColor(c["good"] if num(v) >= 0 else c["bad"])
             if key == "faults" and v:
                 return QColor(c["warn"])
+            if key == "test_summary":
+                if row.get("test_fail"):
+                    return QColor(c["bad"])
+                return QColor(c["good"] if v == "All passed" else c["muted"])
             return None
         if role == Qt.BackgroundRole:
             c = theme.current
@@ -395,13 +404,7 @@ class InventoryTab(QWidget):
             text = f"{shown}   ·   {units} units   ·   Stock value {money(value)}"
             if low:
                 text += f"   ·   {low} low stock"
-        if self.kind in ("working", "faulty", "parts") and written_off:
-            if self.kind == "parts":
-                lost = sum(r["stock_value"] for r in written_off)
-            else:
-                lost = sum(r["total_cost"] * int(num(r.get("quantity"), 1)) for r in written_off)
-            text += f"   ·   {len(written_off)} written off ({money(lost)}, not counted)"
-        else:
+        else:  # sales
             valid = [r for r in rows if not r.get("excluded")]
             revenue = sum(num(r.get("sale_price")) + num(r.get("postage_charged")) for r in valid)
             fees = sum(num(r.get("fees")) for r in valid)
@@ -409,16 +412,25 @@ class InventoryTab(QWidget):
             margin = f"{profit / revenue * 100:.1f}%" if revenue else "-"
             text = (f"{shown}   ·   {len(valid)} sales   ·   Revenue {money(revenue)}   ·   "
                     f"Fees {money(fees)}   ·   Profit {money(profit)}   ·   Margin {margin}")
+        if self.kind != "sales" and written_off:
+            if self.kind == "parts":
+                lost = sum(r["stock_value"] for r in written_off)
+            else:
+                lost = sum(r["total_cost"] * int(num(r.get("quantity"), 1)) for r in written_off)
+            text += f"   ·   {len(written_off)} written off ({money(lost)}, not counted)"
         self.summary.setText(text)
 
     # ------------------------------------------------------------------ header state
     def _settings(self):
         return QSettings(APP_ID, APP_ID)
 
+    def _header_key(self):
+        return f"header/{self.kind}/{len(self.cfg['columns'])}"
+
     def _restore_header(self):
         self._header_restored = True
         hdr = self.view.horizontalHeader()
-        state = self._settings().value(f"header/{self.kind}")
+        state = self._settings().value(self._header_key())
         if state is not None and hdr.restoreState(state):
             return
         for i, (key, _, _) in enumerate(self.cfg["columns"]):
@@ -435,7 +447,7 @@ class InventoryTab(QWidget):
 
     def _save_header(self, *args):
         if self._header_restored:
-            self._settings().setValue(f"header/{self.kind}",
+            self._settings().setValue(self._header_key(),
                                       self.view.horizontalHeader().saveState())
 
     def _col(self, key):
@@ -458,7 +470,7 @@ class InventoryTab(QWidget):
         menu.exec(hdr.mapToGlobal(pos))
 
     def _reset_header(self):
-        self._settings().remove(f"header/{self.kind}")
+        self._settings().remove(self._header_key())
         hdr = self.view.horizontalHeader()
         for i in range(hdr.count()):
             hdr.moveSection(hdr.visualIndex(i), i)
@@ -614,6 +626,21 @@ class InventoryTab(QWidget):
             self.db.log("Status", self.entity, r["id"], f"{r.get('sku')} -> {status}")
         self._done(f"{len(rows)} item(s) set to {status}.")
 
+    def test_device(self):
+        r = self.current()
+        if not r or self.table_name != "devices":
+            return
+        TestDialog(self.db, r["id"], self).exec()
+        self._done()
+
+    def test_report(self):
+        r = self.current()
+        if not r or self.table_name != "devices":
+            return
+        path = export_report(self, self.db, r["id"])
+        if path:
+            self.status_message.emit(f"Test report saved to {path}")
+
     def write_off(self):
         rows = [r for r in self.selected() if r.get("status") != WRITTEN_OFF]
         if not rows or self.kind == "sales":
@@ -759,6 +786,9 @@ class InventoryTab(QWidget):
         elif r:
             menu.addAction("Edit...", self.edit)
             menu.addAction("Notes && Photos...", self.notes)
+            if self.table_name == "devices":
+                menu.addAction("Test Device...", self.test_device)
+                menu.addAction("Test Report (PDF)...", self.test_report)
             menu.addAction("Mark as Sold...", self.sell)
             if self.table_name == "devices":
                 menu.addAction("Use Part From Stock...", self.use_part)

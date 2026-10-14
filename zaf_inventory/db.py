@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from .checklist import summarise, summary_text
 from .fields import (DEFAULT_LISTS, DEVICE_FIELDS, EXCLUDED_SALE_STATUSES,
                      PART_FIELDS, SALE_FIELDS, SQL_TYPES, WRITTEN_OFF)
 
@@ -16,6 +17,8 @@ DEFAULT_SETTINGS = {
     "theme": "dark",
     "backup_dir": "",
     "backup_dir_secondary": "",
+    "report_business": "",
+    "tester_name": "",
     "auto_backup": "1",
     "auto_backup_hours": "24",
     "backup_on_exit": "1",
@@ -150,6 +153,13 @@ class Database:
                 ts TEXT NOT NULL, action TEXT, entity TEXT, entity_id INTEGER,
                 details TEXT);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS device_tests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id INTEGER NOT NULL, test_key TEXT NOT NULL,
+                result TEXT, note TEXT, updated_at TEXT,
+                UNIQUE(device_id, test_key));
+            CREATE TABLE IF NOT EXISTS device_test_meta (
+                device_id INTEGER PRIMARY KEY, tested_at TEXT, tested_by TEXT, notes TEXT);
             CREATE TABLE IF NOT EXISTS sheets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
                 opening_balance REAL DEFAULT 0, position INTEGER DEFAULT 0, created_at TEXT);
@@ -216,6 +226,9 @@ class Database:
             self._remove_photo_file(photo["filename"])
         self.conn.execute("DELETE FROM notes WHERE entity=? AND entity_id=?", (entity, row_id))
         self.conn.execute("DELETE FROM photos WHERE entity=? AND entity_id=?", (entity, row_id))
+        if table == "devices":
+            self.conn.execute("DELETE FROM device_tests WHERE device_id=?", (row_id,))
+            self.conn.execute("DELETE FROM device_test_meta WHERE device_id=?", (row_id,))
         self.conn.execute(f"DELETE FROM {table} WHERE id=?", (row_id,))
         self.conn.commit()
 
@@ -242,7 +255,13 @@ class Database:
         rows = self._with_counts("devices", "device",
                                  "t.category=? AND COALESCE(t.status,'') != 'Sold'", (category,))
         today = dt.date.today()
+        tested = {}
+        for t in self.conn.execute("SELECT device_id, test_key, result FROM device_tests"):
+            tested.setdefault(t["device_id"], {})[t["test_key"]] = {"result": t["result"]}
         for r in rows:
+            counts = summarise(tested.get(r["id"], {}))
+            r["test_fail"] = counts["fail"]
+            r["test_summary"] = summary_text(counts)
             r["total_cost"] = round(num(r.get("purchase_price")) + num(r.get("repair_cost")), 2)
             r["quantity"] = int(num(r.get("quantity"), 1)) if r.get("quantity") is not None else 1
             r["age_days"] = _age_days(r.get("purchase_date") or r.get("created_at"), today)
@@ -519,6 +538,55 @@ class Database:
 
     def delete_sheet_rows(self, row_ids):
         self.conn.executemany("DELETE FROM sheet_rows WHERE id=?", [(i,) for i in row_ids])
+        self.conn.commit()
+
+    # ------------------------------------------------------------------ device tests
+    def device_tests(self, device_id) -> dict:
+        rows = self.conn.execute("SELECT test_key, result, note FROM device_tests "
+                                 "WHERE device_id=?", (device_id,))
+        return {r["test_key"]: {"result": r["result"] or "", "note": r["note"] or ""}
+                for r in rows}
+
+    def set_test(self, device_id, key, result=None, note=None):
+        """Save one test. None leaves that part as it was; an empty row is removed."""
+        current = self.device_tests(device_id).get(key, {"result": "", "note": ""})
+        result = current["result"] if result is None else result
+        note = current["note"] if note is None else note.strip()
+        if not result and not note and not key.startswith("custom:"):
+            self.conn.execute("DELETE FROM device_tests WHERE device_id=? AND test_key=?",
+                              (device_id, key))
+        else:
+            self.conn.execute(
+                "INSERT INTO device_tests (device_id, test_key, result, note, updated_at) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(device_id, test_key) DO UPDATE SET "
+                "result=excluded.result, note=excluded.note, updated_at=excluded.updated_at",
+                (device_id, key, result, note, now_iso()))
+        self.conn.commit()
+
+    def delete_test(self, device_id, key):
+        self.conn.execute("DELETE FROM device_tests WHERE device_id=? AND test_key=?",
+                          (device_id, key))
+        self.conn.commit()
+
+    def clear_tests(self, device_id):
+        """Reset every result but keep the device's custom tests."""
+        self.conn.execute("DELETE FROM device_tests WHERE device_id=? AND test_key NOT LIKE 'custom:%'",
+                          (device_id,))
+        self.conn.execute("UPDATE device_tests SET result='', note='' WHERE device_id=?",
+                          (device_id,))
+        self.conn.commit()
+
+    def test_meta(self, device_id) -> dict:
+        row = self.conn.execute("SELECT * FROM device_test_meta WHERE device_id=?",
+                                (device_id,)).fetchone()
+        return dict(row) if row else {}
+
+    def set_test_meta(self, device_id, tested_by, tested_at, notes):
+        self.conn.execute(
+            "INSERT INTO device_test_meta (device_id, tested_at, tested_by, notes) VALUES (?,?,?,?) "
+            "ON CONFLICT(device_id) DO UPDATE SET tested_at=excluded.tested_at, "
+            "tested_by=excluded.tested_by, notes=excluded.notes",
+            (device_id, tested_at, tested_by, notes))
         self.conn.commit()
 
     # ------------------------------------------------------------------ activity & settings
