@@ -26,7 +26,8 @@ jobs:
             asset: ZafInventory-Linux-x64.tar.gz
     runs-on: ${{ matrix.os }}
     env:
-      QT_QPA_PLATFORM: offscreen
+      # Windows' offscreen mode has no fonts (PDFs come out as boxes), so use the real display there
+      QT_QPA_PLATFORM: ${{ runner.os == 'Windows' && 'windows' || 'offscreen' }}
     steps:
       - uses: actions/checkout@v4
 
