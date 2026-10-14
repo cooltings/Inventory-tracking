@@ -66,10 +66,20 @@ jobs:
           EOF
 
       - name: Backup / restore, write-off and device test checks
+        env:
+          ZAF_TEST_OUT: ${{ runner.temp }}/test-out
         run: |
           python tests/test_backup_restore.py
           python tests/test_written_off.py
           python tests/test_device_tests.py
+
+      - name: Keep test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-${{ matrix.os }}
+          path: ${{ runner.temp }}/test-out
+          if-no-files-found: ignore
 
       - name: Make icon
         run: python tools/make_icon.py

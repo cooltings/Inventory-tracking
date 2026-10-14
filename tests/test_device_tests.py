@@ -160,13 +160,22 @@ else:
     doc = QPdfDocument()
     doc.load(str(pdf))
     assert doc.pageCount() >= 3, doc.pageCount()
+    text = " ".join(doc.getAllText(p).text() for p in range(doc.pageCount())) \
+        if hasattr(doc, "getAllText") else ""
+    out_dir = os.environ.get("ZAF_TEST_OUT")  # CI keeps these so a failure can be inspected
+    if out_dir:
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copy2(pdf, Path(out_dir) / "report.pdf")
+        (Path(out_dir) / "extracted-text.txt").write_text(text, encoding="utf-8")
+        for page in range(min(doc.pageCount(), 3)):
+            doc.render(page, QSize(900, 1273)).save(str(Path(out_dir) / f"page{page + 1}.png"))
     if hasattr(doc, "getAllText"):
-        text = " ".join(doc.getAllText(p).text() for p in range(doc.pageCount()))
         for needle in ("Device Test Report", "Zaf Phones", "356938035643809", "F2LXK0ABQ1N2", "A2403",
                        "128GB", "4GB", "Blue", "87%", "412 cycles", "iOS 17.5", "B - Good",
                        "Light scratches on screen", "1 TEST FAILED", "No 5G signal on EE",
                        "Taptic feedback on keyboard", "Clean phone, 5G needs attention.", "Anthony"):
-            assert needle in text, f"{needle!r} missing from the PDF"
+            assert needle in text, f"{needle!r} missing from the PDF; extracted {len(text)} chars: {text[:300]!r}"
     assert not doc.render(0, QSize(300, 400)).isNull()
 
 # deleting a device removes its test data
