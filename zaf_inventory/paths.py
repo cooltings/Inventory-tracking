@@ -20,6 +20,11 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def is_android() -> bool:
+    return bool(os.environ.get("ANDROID_PRIVATE") or os.environ.get("ANDROID_ARGUMENT")) \
+        or hasattr(sys, "getandroidapilevel")
+
+
 def is_portable() -> bool:
     return (app_dir() / "portable.txt").exists()
 
@@ -28,6 +33,8 @@ def data_dir() -> Path:
     override = os.environ.get("ZAF_DATA_DIR")
     if override:
         path = Path(override)
+    elif is_android():  # the app's private storage, kept until the app is uninstalled
+        path = Path(os.environ.get("ANDROID_PRIVATE") or Path.home()) / APP_ID
     elif is_portable():
         path = app_dir() / "data"
     elif sys.platform == "win32":
