@@ -15,6 +15,36 @@ New releases are built automatically by GitHub Actions whenever a version tag is
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
+## Android tablet (Samsung DeX)
+
+`ZafInventory-Android-arm64.apk` on the Releases page is the same app for Android tablets and phones.
+- **Installing:** download the APK on the tablet and open it. Android will ask you to allow installs from your browser or file manager the first time.
+- **DeX:** in Samsung DeX it opens in its own window, which you can resize and maximise like the Windows app. It works with a keyboard and mouse, and the keyboard shortcuts work too.
+- **Where data is kept:** in the app's private storage, which is removed if the app is uninstalled. Sync with the PC, or use **File → Backup & Restore → Save a Copy As...**, to keep a copy elsewhere.
+- **Files:** exports, PDF reports and backup copies are saved wherever you choose in the Android file picker (Downloads, Drive and so on).
+
+## Syncing the PC and the tablet
+
+Sync works two ways over your Wi-Fi. You can edit on either device and sync whenever both are on the same network. No internet or cloud account is involved.
+
+1. **On the Windows PC:** go to **File → Sync Settings...** and tick *Allow other devices to sync with this one*. Note the address and 6-digit **pairing code** it shows. If Windows asks about the firewall, allow access on **private** networks.
+2. **On the tablet:** go to **File → Sync Settings...** and press **Find PC**, or type the address. Enter the pairing code and press **Sync Now**.
+3. **After that:** press **Sync** in the toolbar (Ctrl+Y) on the tablet whenever you want to sync.
+
+**Manual or automatic:** sync is **manual only** by default, so it only happens when you press Sync. On the Sync screen you can switch to *Automatic* to also sync when the app opens and every few minutes. If the PC isn't reachable then, the automatic sync is skipped quietly.
+
+**What happens when the same thing changes on both devices**
+- **Edits:** if the same item was edited on both, the newest edit wins.
+- **Deletes:** something deleted on one device is deleted on the other.
+- **Edited after a delete:** an item edited on one device *after* it was deleted on the other comes back.
+- **Photos:** photos are copied whichever way they're missing.
+
+**What syncs:** stock, parts, sales, notes, photos, test results, sheets, the activity log and the shared lists and fee settings all sync. Theme, backup settings and sync settings stay separate on each device.
+
+**SKUs:** items added on the tablet get SKUs like `WP-T00012`, so they never clash with SKUs from the PC.
+
+**Setting up the tablet:** set it up by syncing to an empty install, rather than by restoring a backup. A backup from before version 1.2, restored on both devices, would show duplicates on the first sync.
+
 ## Building it yourself on Windows
 
 1. Install **Python 3.10 or newer** from python.org. During setup, tick **"Add python.exe to PATH"**.
@@ -90,6 +120,7 @@ stock value. The dashboard shows the total written off, and you can set it back 
 | Ctrl+D | Duplicate |
 | Ctrl+F | Search this tab |
 | Ctrl+K | Search everything |
+| Ctrl+Y | Sync |
 | Ctrl+B | Back up now |
 | Ctrl+1 … Ctrl+8 | Switch tabs |
 | F5 | Refresh |

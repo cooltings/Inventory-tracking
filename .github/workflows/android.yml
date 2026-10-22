@@ -17,6 +17,7 @@ jobs:
       matrix:
         arch: [aarch64, x86_64]
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +37,14 @@ jobs:
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platform-tools" "platforms;android-34" "build-tools;35.0.0" "ndk;${NDK_VERSION}" > /dev/null
           ls "$ANDROID_HOME/ndk"
+          # buildozer looks for the old SDK layout (tools/bin/sdkmanager)
+          mkdir -p "$ANDROID_HOME/tools/bin"
+          for t in sdkmanager avdmanager; do
+            ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/$t" "$ANDROID_HOME/tools/bin/$t"
+          done
 
       - name: Build tools
+        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git zip unzip autoconf automake libtool \
@@ -84,6 +91,7 @@ jobs:
   emulator:
     needs: build
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
