@@ -18,6 +18,8 @@ COLOURS = {  # background, text
     "": ("#fef9c3", "#854d0e"),
 }
 LABEL_BG = "#f3f4f6"
+DASH = '<span style="color:#888">-</span>'
+NO_NOTE = '<span style="color:#888">No note</span>'
 LINE = "#c9ced6"
 
 
@@ -54,7 +56,7 @@ def _grid(pairs) -> str:
         cells = ""
         for label, value in pairs[i:i + 2]:
             cells += (f"<td width='20%' bgcolor='{LABEL_BG}'><b>{_e(label)}</b></td>"
-                      f"<td width='30%'>{value if value else '<span style=\"color:#888\">-</span>'}</td>")
+                      f"<td width='30%'>{value if value else DASH}</td>")
         if len(pairs[i:i + 2]) == 1:
             cells += "<td width='20%'></td><td width='30%'></td>"
         rows.append(f"<tr>{cells}</tr>")
@@ -155,7 +157,7 @@ def report_html(db, device_id) -> str:
                      "<b>Failed items</b></p>")
         rows = "".join(
             f"<tr><td width='34%'>{_e(label)}<br/><span style='color:#6b7280; font-size:8pt;'>"
-            f"{_e(name)}</span></td><td width='66%'>{_e(note) or '<span style=\"color:#888\">No note</span>'}</td></tr>"
+            f"{_e(name)}</span></td><td width='66%'>{_e(note) or NO_NOTE}</td></tr>"
             for name, label, note in failed)
         parts.append(f"<table width='100%' border='1' cellspacing='0' cellpadding='5' "
                      f"style='border-color:{LINE}; border-style:solid;' bgcolor='#fff5f5'>{rows}</table>")

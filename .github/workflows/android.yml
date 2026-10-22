@@ -47,6 +47,9 @@ jobs:
           python -m pip install -r "$(python -c 'import PySide6, pathlib; print(pathlib.Path(PySide6.__file__).parent / "scripts" / "requirements-android.txt")')"
           python tools/android/patch_deploy.py
 
+      - name: Check the code runs on the tablet's Python (3.11)
+        run: python -m compileall -q zaf_inventory main.py
+
       - name: Download Qt for Python Android wheels
         run: |
           base=https://download.qt.io/official_releases/QtForPython

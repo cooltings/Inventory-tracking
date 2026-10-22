@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from .checklist import summarise, summary_text
+from .paths import is_android
 from .fields import (DEFAULT_LISTS, DEVICE_FIELDS, EXCLUDED_SALE_STATUSES,
                      PART_FIELDS, SALE_FIELDS, SQL_TYPES, WRITTEN_OFF)
 
@@ -24,9 +25,26 @@ DEFAULT_SETTINGS = {
     "backup_on_exit": "1",
     "backup_keep": "30",
     "last_backup": "",
+    # sync (these stay on each device; see SYNCED_SETTINGS for the shared ones)
+    "sync_host_enabled": "0",
+    "sync_code": "",
+    "sync_peer": "",
+    "sync_peer_code": "",
+    "sync_auto": "0",          # 0 = manual only (default), 1 = automatic
+    "sync_auto_minutes": "15",
+    "last_sync": "",
+    "sku_tag": "T" if is_android() else "",  # keeps tablet SKUs distinct from the PC's
 }
 
 SKU_PREFIX = {"working": "WP", "faulty": "FD", "parts": "PT"}
+
+# Tables kept in step between devices by sync. Each gets a permanent "uid" (same on
+# every device) and a "sync_ts" (UTC time of the last change), both maintained by
+# triggers so every write path is covered; deletes are recorded in sync_deleted.
+SYNC_TABLES = ("devices", "parts", "sales", "notes", "photos", "sheets", "sheet_rows",
+               "device_tests", "device_test_meta", "settings", "activity")
+SYNC_NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
+LEGACY_TS = "2000-01-01T00:00:00.000"
 
 _EXTRA_COLUMNS = {
     "devices": [("category", "TEXT NOT NULL DEFAULT 'working'"), ("sold_at", "TEXT")],
@@ -173,8 +191,45 @@ class Database:
             CREATE INDEX IF NOT EXISTS ix_devices_imei ON devices(imei);
             CREATE INDEX IF NOT EXISTS ix_sales_date ON sales(sale_date);
         """)
+        self._sync_schema()
         c.commit()
         self._columns = {}
+
+    def _sync_schema(self):
+        c = self.conn
+        c.execute("CREATE TABLE IF NOT EXISTS sync_deleted (tbl TEXT NOT NULL, uid TEXT NOT NULL, "
+                  "deleted_at TEXT NOT NULL, PRIMARY KEY (tbl, uid))")
+        for t in SYNC_TABLES:
+            cols = {r["name"] for r in c.execute(f"PRAGMA table_info({t})")}
+            for name in ("uid", "sync_ts"):
+                if name not in cols:
+                    c.execute(f"ALTER TABLE {t} ADD COLUMN {name} TEXT")
+            # settings are identified by name on every device; everything else gets a
+            # random uid (rows from before sync existed included)
+            new_uid = "'S-' || NEW.key" if t == "settings" else "lower(hex(randomblob(16)))"
+            c.execute(f"UPDATE {t} SET uid = {new_uid.replace('NEW.', '')} WHERE uid IS NULL")
+            c.execute(f"UPDATE {t} SET sync_ts = '{LEGACY_TS}' WHERE sync_ts IS NULL")
+            c.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS ux_{t}_uid ON {t}(uid)")
+            changed = "NEW.sync_ts IS OLD.sync_ts"
+            if t == "settings":  # saving Settings re-writes every value; only real changes count
+                changed += " AND NEW.value IS NOT OLD.value"
+            c.executescript(f"""
+                CREATE TRIGGER IF NOT EXISTS sync_{t}_ins AFTER INSERT ON {t}
+                WHEN NEW.uid IS NULL OR NEW.sync_ts IS NULL BEGIN
+                    UPDATE {t} SET uid = COALESCE(NEW.uid, {new_uid}),
+                                   sync_ts = COALESCE(NEW.sync_ts, {SYNC_NOW})
+                    WHERE rowid = NEW.rowid;
+                END;
+                CREATE TRIGGER IF NOT EXISTS sync_{t}_upd AFTER UPDATE ON {t}
+                WHEN {changed} BEGIN
+                    UPDATE {t} SET sync_ts = {SYNC_NOW} WHERE rowid = NEW.rowid;
+                END;
+                CREATE TRIGGER IF NOT EXISTS sync_{t}_del AFTER DELETE ON {t}
+                WHEN OLD.uid IS NOT NULL BEGIN
+                    INSERT OR REPLACE INTO sync_deleted (tbl, uid, deleted_at)
+                    VALUES ('{t}', OLD.uid, {SYNC_NOW});
+                END;
+            """)
 
     def columns(self, table) -> set:
         if table not in self._columns:
@@ -200,8 +255,9 @@ class Database:
         if table in ("devices", "parts") and not data.get("sku"):
             prefix = SKU_PREFIX["parts"] if table == "parts" else \
                 SKU_PREFIX.get(data.get("category", "working"), "WP")
+            tag = self.setting("sku_tag")
             self.conn.execute(f"UPDATE {table} SET sku=? WHERE id=?",
-                              (f"{prefix}-{new_id:05d}", new_id))
+                              (f"{prefix}-{tag}{new_id:05d}", new_id))
         if commit:
             self.conn.commit()
         return new_id

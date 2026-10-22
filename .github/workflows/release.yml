@@ -77,6 +77,7 @@ jobs:
           python tests/test_backup_restore.py
           python tests/test_written_off.py
           python tests/test_device_tests.py
+          python tests/test_sync.py
 
       - name: Keep test output
         if: always()

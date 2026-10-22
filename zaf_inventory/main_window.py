@@ -11,6 +11,8 @@ from .dialogs import (BackupDialog, GlobalSearchDialog, SettingsDialog, choose_b
                       restore_with_prompt)
 from .paths import data_dir, is_portable
 from .sheets import SheetsTab
+from .sync import SyncError
+from .sync_ui import SyncController, SyncDialog, describe
 from .views import ActivityTab, InventoryTab
 from .widgets import UI, fmt_ts
 
@@ -21,7 +23,7 @@ SHORTCUTS = """
 <b>Ctrl+U</b> Use part on device &nbsp; <b>Ctrl+D</b> Duplicate<br>
 <b>Ctrl+F</b> Search this tab &nbsp; <b>Ctrl+K</b> Search everything<br>
 <b>Ctrl+Shift+I</b> Import backup .zip<br>
-<b>Ctrl+B</b> Back up now &nbsp; <b>F5</b> Refresh &nbsp; <b>Ctrl+1..8</b> Switch tab<br>
+<b>Ctrl+Y</b> Sync &nbsp; <b>Ctrl+B</b> Back up now &nbsp; <b>F5</b> Refresh &nbsp; <b>Ctrl+1..8</b> Switch tab<br>
 <b>Ctrl+C</b> Copy selected rows (paste into Excel / Sheets)<br>
 Right-click a column heading to show / hide columns.
 """
@@ -76,6 +78,21 @@ class MainWindow(QMainWindow):
         self.backup_timer.timeout.connect(self._auto_backup)
         self.backup_timer.start(30 * 60 * 1000)
 
+        # sync: the PC side starts if it was switched on; tablet syncs are manual unless
+        # automatic sync has been chosen on the Sync screen
+        self.sync = SyncController(db, self)
+        self.sync.host_synced.connect(self._host_synced)
+        self.sync.sync_started.connect(lambda: self.statusBar().showMessage("Syncing..."))
+        self.sync.sync_progress.connect(lambda m: self.statusBar().showMessage(m))
+        self.sync.sync_finished.connect(self._sync_finished)
+        self.sync.sync_failed.connect(self._sync_failed)
+        if db.setting("sync_host_enabled") == "1":
+            try:
+                self.sync.start_host()
+            except SyncError as exc:
+                self.statusBar().showMessage(str(exc), 15000)
+        self.sync.apply_auto_setting()
+
     # ------------------------------------------------------------------ actions
     def _act(self, text, slot, shortcut=None, tip=None):
         a = QAction(text, self)
@@ -110,6 +127,9 @@ class MainWindow(QMainWindow):
         self.a_search = self._act("Search All", self.global_search, "Ctrl+K",
                                   "Search every tab, notes included")
         self.a_backup = self._act("Back Up", self.backup_now, "Ctrl+B", "Back up now")
+        self.a_sync = self._act("Sync", self.sync_action, "Ctrl+Y",
+                                "Sync with the PC / tablet (set up on the Sync screen)")
+        self.a_sync_settings = self._act("Sync Settings...", self.open_sync)
         self.a_backups = self._act("Backup && Restore...", self.open_backups)
         self.a_import_backup = self._act("Import Backup (.zip)...", self.import_backup,
                                          "Ctrl+Shift+I", "Load a backup / import zip")
@@ -130,7 +150,7 @@ class MainWindow(QMainWindow):
                   self.a_return, self.a_calc, self.a_delete):
             tb.addAction(a)
         tb.addSeparator()
-        for a in (self.a_search, self.a_backup, self.a_settings):
+        for a in (self.a_search, self.a_sync, self.a_backup, self.a_settings):
             tb.addAction(a)
 
         mb = self.menuBar()
@@ -141,6 +161,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_backup)
         m.addAction(self.a_backups)
+        m.addAction(self.a_sync)
+        m.addAction(self.a_sync_settings)
         m.addAction("Open Data Folder", lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(data_dir()))))
         m.addAction("Check && Compact Database", self.maintenance)
@@ -322,6 +344,36 @@ class MainWindow(QMainWindow):
         dlg.exec()
         self._update_backup_label()
 
+    # ------------------------------------------------------------------ sync
+    def sync_action(self):
+        if self.sync.configured():
+            if not self.sync.sync_now():
+                self.statusBar().showMessage("A sync is already running...", 4000)
+        else:
+            self.open_sync()
+
+    def open_sync(self):
+        SyncDialog(self.db, self.sync, self).exec()
+        self.refresh_all()
+
+    def _sync_finished(self, summary):
+        self.refresh_all()
+        self.statusBar().showMessage(describe(summary), 15000)
+
+    def _sync_failed(self, msg):
+        if msg.startswith("[auto] "):  # automatic syncs fail quietly (PC may just be off)
+            self.statusBar().showMessage("Automatic sync skipped: " + msg[7:], 15000)
+        else:
+            self.statusBar().showMessage("Sync failed", 8000)
+            if not self.findChild(SyncDialog):
+                QMessageBox.warning(self, "Sync Failed", msg)
+
+    def _host_synced(self, received):
+        self.refresh_all()
+        self.statusBar().showMessage(
+            f"A device synced with this one: {received.get('added', 0)} new, "
+            f"{received.get('updated', 0)} changed, {received.get('deleted', 0)} deleted", 15000)
+
     def closeEvent(self, event):
         settings = QSettings(APP_ID, APP_ID)
         settings.setValue("window/geometry", self.saveGeometry())
@@ -336,5 +388,6 @@ class MainWindow(QMainWindow):
                         != QMessageBox.Yes:
                     event.ignore()
                     return
+        self.sync.shutdown()
         self.db.close()
         event.accept()
