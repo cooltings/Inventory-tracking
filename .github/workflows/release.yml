@@ -122,7 +122,7 @@ jobs:
     uses: ./.github/workflows/android.yml
 
   release:
-    needs: [build, android]
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -132,10 +132,6 @@ jobs:
           pattern: ZafInventory-*
           merge-multiple: true
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: android-aarch64
-          path: assets
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -160,3 +156,18 @@ jobs:
             **Portable mode:** create an empty `portable.txt` next to the app. Data is then kept in a `data` folder beside it.
             Otherwise, data lives in `%APPDATA%\ZafInventory` on Windows, `~/Library/Application Support/ZafInventory` on macOS, or `~/.local/share/ZafInventory` on Linux.
             Upgrading never touches your data. Just replace the app folder.
+
+  # the Android build takes much longer; its APK is added to the release when it's done
+  android-release:
+    needs: [release, android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-aarch64
+          path: apk
+      - name: Attach APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" apk/ZafInventory-Android-arm64.apk --repo "${GITHUB_REPOSITORY}" --clobber
