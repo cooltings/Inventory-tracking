@@ -17,9 +17,19 @@ PERMISSIONS = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK
 target = Path(PySide6.__file__).parent / "scripts" / "deploy_lib" / "android" / "buildozer.py"
 src = target.read_text()
 
+# python-for-android moved to Python 3.14 on 2025-10-27, but the Qt for Python 6.10 Android
+# wheels are built for 3.11 (libshiboken6 links libpython3.11.so). Pin the last commit
+# before that switch: Python 3.11.13, and it includes the Qt bootstrap fixes PySide needs.
+P4A_COMMIT = "3762c88c56e3443efb8eba2a02a2604b680240fd"
+
 replacements = [
     ('self.set_value("app", "requirements", "python3,shiboken6,PySide6")',
      'self.set_value("app", "requirements", "python3,sqlite3,shiboken6,PySide6")'),
+    ('self.set_value("app", "p4a.branch", "develop")',
+     'self.set_value("app", "p4a.branch", "develop")\n'
+     f'        self.set_value("app", "p4a.commit", "{P4A_COMMIT}", raise_warning=False)\n'
+     '        self.set_value("app", "source.exclude_dirs", "tests,tools,wheels,.github,bin",'
+     ' raise_warning=False)'),
     ('permissions = ", ".join(permissions)',
      f'permissions = ", ".join(sorted(set(permissions) | set({PERMISSIONS!r})))'),
 ]

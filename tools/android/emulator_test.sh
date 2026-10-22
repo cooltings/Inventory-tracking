@@ -20,3 +20,8 @@ adb shell run-as "$PKG" sh -c 'find . -name error.log -exec cat {} \;' > "$OUT/e
 adb shell run-as "$PKG" sh -c 'find . -name inventory.db' > "$OUT/db-files.txt" 2>&1 || true
 grep -iE "python|qt|zaf|traceback|error|fatal" "$OUT/logcat.txt" | tail -200 > "$OUT/logcat-filtered.txt" || true
 cat "$OUT/pid.txt"
+if grep -q "NOT RUNNING" "$OUT/pid.txt"; then
+  echo "The app is not running after launch - see emulator-output/logcat-filtered.txt"
+  grep -E "FATAL|UnsatisfiedLinkError|Traceback|Error" "$OUT/logcat.txt" | grep -i -E "zaf|python|qt|shiboken" | head -20
+  exit 1
+fi
