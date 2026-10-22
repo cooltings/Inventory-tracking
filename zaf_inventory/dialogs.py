@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateEdi
                                QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
                                QVBoxLayout, QWidget)
 
-from . import backup
+from . import backup, fileio
+from .paths import is_android
 from .db import calc_profit, device_title, imei_valid, num, part_title, today_iso
 from .fields import (DEVICE_FIELDS, EXCLUDED_SALE_STATUSES, PART_FIELDS, SALE_STATUSES)
 from .widgets import UI, FormPanel, NotesWidget, PhotosWidget, fmt_ts, money
@@ -581,6 +582,9 @@ class SettingsDialog(QDialog):
         lay.addWidget(bb)
 
     def _with_browse(self, edit):
+        if is_android():  # Android folders are picked per file, not typed in
+            edit.setReadOnly(True)
+            return edit
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
@@ -615,13 +619,15 @@ class SettingsDialog(QDialog):
 # ============================================================================ backups
 def restore_with_prompt(parent, db, path) -> bool:
     """Confirm, restore a backup zip and report the result. True if data was replaced."""
+    name = fileio.display_name(path)
     if QMessageBox.warning(
             parent, "Restore Backup",
-            f"Replace ALL current data with the backup:\n{Path(path).name}\n\n"
+            f"Replace ALL current data with the backup:\n{name}\n\n"
             "A safety backup of your current data is taken first, so this can be undone.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
         return False
     try:
+        path = fileio.local_copy(path, ".zip")
         safety = backup.restore_backup(db, path)
     except Exception as exc:
         import traceback
@@ -637,7 +643,7 @@ def restore_with_prompt(parent, db, path) -> bool:
                              "error.log in the data folder.")
         return False
     QMessageBox.information(parent, "Restore Complete",
-                            f"Data restored from {Path(path).name}.\n\n"
+                            f"Data restored from {name}.\n\n"
                             f"Your previous data was saved as:\n{safety.name}")
     return True
 
@@ -668,11 +674,13 @@ class BackupDialog(QDialog):
         self.table.verticalHeader().hide()
         lay.addWidget(self.table, 1)
         row = QHBoxLayout()
-        actions = [("Back Up Now", self._backup), ("Back Up To...", self._backup_to),
+        actions = [("Back Up Now", self._backup), ("Save a Copy As...", self._backup_to),
                    ("Verify", self._verify), ("Restore Selected", self._restore_selected),
                    ("Restore From File...", self._restore_file), ("Open Folder", self._open),
                    ("Delete", self._delete)]
         for text, fn in actions:
+            if text == "Open Folder" and is_android():
+                continue  # app storage can't be browsed on Android
             b = QPushButton(text)
             b.clicked.connect(fn)
             if text == "Back Up Now":
@@ -721,13 +729,23 @@ class BackupDialog(QDialog):
         QMessageBox.information(self, "Backup Complete", f"Saved to:\n{p}")
 
     def _backup_to(self):
-        folder = QFileDialog.getExistingDirectory(self, "Back Up To Folder")
-        if folder:
-            try:
-                p = backup.create_backup(self.db, "manual", dest_dir=folder)
-                QMessageBox.information(self, "Backup Complete", f"Saved to:\n{p}")
-            except Exception as exc:
-                QMessageBox.critical(self, "Backup Failed", str(exc))
+        """Back up, then save a copy anywhere (USB stick, cloud folder, Android Downloads...)."""
+        try:
+            made = backup.create_backup(self.db, "manual")
+        except Exception as exc:
+            QMessageBox.critical(self, "Backup Failed", str(exc))
+            return
+        self.reload()
+        path, _ = QFileDialog.getSaveFileName(self, "Save a Copy of the Backup", made.name,
+                                              "Zaf Inventory backup (*.zip)")
+        if not path:
+            return
+        try:
+            fileio.write_bytes(path, made.read_bytes())
+            QMessageBox.information(self, "Backup Complete",
+                                    f"Saved a copy as:\n{fileio.display_name(path)}")
+        except OSError as exc:
+            QMessageBox.critical(self, "Backup Failed", str(exc))
 
     def _verify(self):
         p = self._selected()

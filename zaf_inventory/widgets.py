@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QCompleter, QDateEd
                                QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
                                QVBoxLayout, QWidget)
 
+from . import fileio
 from .db import num, split_faults
 from .paths import photos_dir
 
@@ -380,17 +381,24 @@ class PhotosWidget(QWidget):
             pix = QPixmap(path)
             icon = QIcon(pix.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)) \
                 if not pix.isNull() else QIcon()
-            item = QListWidgetItem(icon, Path(path).name[:22])
+            item = QListWidgetItem(icon, fileio.display_name(path)[:22])
             item.setData(Qt.UserRole, pid)
             item.setData(Qt.UserRole + 1, path)
             self.list.addItem(item)
 
+    def _store(self, entity_id, picked):
+        self.db.add_photo(self.entity, entity_id, fileio.local_copy(picked),
+                          caption=fileio.display_name(picked))
+
     def add_files(self, paths):
         for p in paths:
-            if self.entity_id:
-                self.db.add_photo(self.entity, self.entity_id, p)
-            else:
-                self.pending.append(p)
+            try:
+                if self.entity_id:
+                    self._store(self.entity_id, p)
+                else:
+                    self.pending.append(p)
+            except OSError as exc:
+                QMessageBox.warning(self, "Add Photos", str(exc))
         self.reload()
 
     def browse(self):
@@ -427,5 +435,5 @@ class PhotosWidget(QWidget):
     def flush(self, entity_id):
         self.entity_id = entity_id
         for p in self.pending:
-            self.db.add_photo(self.entity, entity_id, p)
+            self._store(entity_id, p)
         self.pending = []

@@ -413,15 +413,17 @@ class Database:
                                  (entity, entity_id))
         return [dict(r) for r in rows]
 
-    def add_photo(self, entity, entity_id, src_path):
+    def add_photo(self, entity, entity_id, src_path, caption=None):
         import shutil
         import uuid
         from .paths import photos_dir
         src = Path(src_path)
-        name = f"{entity}-{entity_id}-{uuid.uuid4().hex[:8]}{src.suffix.lower()}"
+        caption = caption or src.name
+        suffix = Path(caption).suffix.lower() or src.suffix.lower()
+        name = f"{entity}-{entity_id}-{uuid.uuid4().hex[:8]}{suffix}"
         shutil.copy2(src, photos_dir() / name)
         self.conn.execute("INSERT INTO photos (entity, entity_id, filename, caption, created_at) "
-                          "VALUES (?,?,?,?,?)", (entity, entity_id, name, src.name, now_iso()))
+                          "VALUES (?,?,?,?,?)", (entity, entity_id, name, caption, now_iso()))
         self.conn.commit()
 
     def delete_photo(self, photo_id):

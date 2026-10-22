@@ -1,6 +1,7 @@
 """Spreadsheet-style ledgers with a running total column."""
 import csv
 import datetime as dt
+import io
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QShortcut
@@ -9,7 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QDoubleSpinBox, QFileDialog, Q
                                QListWidgetItem, QMenu, QMessageBox, QPushButton, QSplitter,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import theme
+from . import fileio, theme
 from .db import num
 from .widgets import fmt_date, money
 
@@ -350,8 +351,12 @@ class SheetsTab(QWidget):
                                               "CSV files (*.csv)")
         if not path:
             return
-        with open(path, "w", newline="", encoding="utf-8-sig") as fh:
-            w = csv.writer(fh)
-            w.writerow([c[1] for c in COLUMNS])
-            for row in self.rows:
-                w.writerow([row.get(k) if row.get(k) is not None else "" for k, _, _ in COLUMNS])
+        fh = io.StringIO(newline="")
+        w = csv.writer(fh)
+        w.writerow([c[1] for c in COLUMNS])
+        for row in self.rows:
+            w.writerow([row.get(k) if row.get(k) is not None else "" for k, _, _ in COLUMNS])
+        try:
+            fileio.write_bytes(path, fh.getvalue().encode("utf-8-sig"))
+        except OSError as exc:
+            QMessageBox.critical(self, "Export Failed", str(exc))

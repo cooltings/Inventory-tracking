@@ -9,7 +9,7 @@ from .dashboard import Dashboard
 from .db import num
 from .dialogs import (BackupDialog, GlobalSearchDialog, SettingsDialog, choose_backup_file,
                       restore_with_prompt)
-from .paths import data_dir, is_portable
+from .paths import data_dir, is_android, is_portable
 from .sheets import SheetsTab
 from .sync import SyncError
 from .sync_ui import SyncController, SyncDialog, describe
@@ -163,8 +163,9 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_backups)
         m.addAction(self.a_sync)
         m.addAction(self.a_sync_settings)
-        m.addAction("Open Data Folder", lambda: QDesktopServices.openUrl(
-            QUrl.fromLocalFile(str(data_dir()))))
+        if not is_android():
+            m.addAction("Open Data Folder", lambda: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(data_dir()))))
         m.addAction("Check && Compact Database", self.maintenance)
         m.addSeparator()
         m.addAction("Exit", self.close)

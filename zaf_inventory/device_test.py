@@ -1,5 +1,6 @@
 """Device testing screen: checklist, device details and PDF report."""
 import datetime as dt
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDateEdit, QDialog,
                                QPushButton, QScrollArea, QTableWidget, QTableWidgetItem,
                                QTabWidget, QVBoxLayout, QWidget)
 
-from . import report, theme
+from . import fileio, report, theme
 from .checklist import (APPLIES, CUSTOM_PREFIX, FAIL, NA, NOTE_FOR, PASS, RESULTS, is_custom,
                         not_applicable_keys, summarise, summary_text)
 from .db import device_title, imei_valid
@@ -86,17 +87,21 @@ def export_report(parent, db, device_id):
                                           "PDF files (*.pdf)")
     if not path:
         return None
-    if not path.lower().endswith(".pdf"):
+    if not fileio.is_uri(path) and not path.lower().endswith(".pdf"):
         path += ".pdf"
     try:
-        report.write_pdf(db, device_id, path)
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = report.write_pdf(db, device_id, Path(tmp) / "report.pdf")
+            fileio.write_bytes(path, pdf.read_bytes())
     except Exception as exc:  # e.g. file open in a PDF viewer, folder not writable
         QMessageBox.critical(parent, "Report Failed", f"Could not create the PDF:\n\n{exc}")
         return None
-    db.set_setting("report_dir", str(Path(path).parent))
-    db.log("Report", "device", device_id, f"{device.get('sku')} test report {Path(path).name}")
-    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
-    return Path(path)
+    if not fileio.is_uri(path):
+        db.set_setting("report_dir", str(Path(path).parent))
+    db.log("Report", "device", device_id,
+           f"{device.get('sku')} test report {fileio.display_name(path)}")
+    fileio.open_external(path)
+    return path
 
 
 class TestDialog(QDialog):
@@ -496,7 +501,7 @@ class TestDialog(QDialog):
         self._save_details()
         path = export_report(self, self.db, self.device_id)
         if path:
-            self.stats.setText(f"Report saved: {path}")
+            self.stats.setText(f"Report saved: {fileio.display_name(path)}")
 
     def done(self, result):
         self._save_details()

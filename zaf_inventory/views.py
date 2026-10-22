@@ -1,6 +1,7 @@
 """Inventory tabs (working, faulty, parts, sold), activity log and the table model."""
 import csv
 import datetime as dt
+import io
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSettings, QSortFilterProxyModel,
                             Qt, Signal)
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
                                QMessageBox,
                                QPushButton, QTableView, QVBoxLayout, QWidget)
 
-from . import APP_ID, theme
+from . import APP_ID, fileio, theme
 from .db import device_title, num, part_title, split_faults
 from .device_test import TestDialog, export_report
 from .dialogs import (ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog,
@@ -692,14 +693,18 @@ class InventoryTab(QWidget):
             return
         rows = self.visible_rows()
         cols = [c for c in self.cfg["columns"] if c[2] != "notes"]
-        with open(path, "w", newline="", encoding="utf-8-sig") as fh:
-            w = csv.writer(fh)
-            w.writerow([c[1] for c in cols] + ["Notes"])
-            for r in rows:
-                notes = " | ".join(n["body"] for n in reversed(self.db.notes(self.entity, r["id"])))
-                w.writerow([r.get(c[0]) if r.get(c[0]) is not None else "" for c in cols]
-                           + [notes])
-        self.status_message.emit(f"Exported {len(rows)} rows to {path}")
+        fh = io.StringIO(newline="")
+        w = csv.writer(fh)
+        w.writerow([c[1] for c in cols] + ["Notes"])
+        for r in rows:
+            notes = " | ".join(n["body"] for n in reversed(self.db.notes(self.entity, r["id"])))
+            w.writerow([r.get(c[0]) if r.get(c[0]) is not None else "" for c in cols] + [notes])
+        try:
+            fileio.write_bytes(path, fh.getvalue().encode("utf-8-sig"))
+        except OSError as exc:
+            QMessageBox.critical(self, "Export Failed", str(exc))
+            return
+        self.status_message.emit(f"Exported {len(rows)} rows to {fileio.display_name(path)}")
 
     def import_csv(self):
         if self.kind == "sales":
@@ -711,7 +716,7 @@ class InventoryTab(QWidget):
                                               "Zaf Inventory backup (*.zip)")
         if not path:
             return
-        if path.lower().endswith(".zip"):
+        if fileio.display_name(path).lower().endswith(".zip"):
             if restore_with_prompt(self, self.db, path):
                 self._done("Backup restored.")
             return
@@ -722,7 +727,7 @@ class InventoryTab(QWidget):
             lookup[f.label.lower()] = f
         added, skipped = 0, 0
         try:
-            with open(path, newline="", encoding="utf-8-sig") as fh:
+            with io.StringIO(fileio.read_text(path), newline="") as fh:
                 reader = csv.DictReader(fh)
                 mapping = {h: lookup.get((h or "").strip().lower()) for h in reader.fieldnames or []}
                 matched = [h for h, f in mapping.items() if f]
