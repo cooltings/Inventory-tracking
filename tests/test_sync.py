@@ -196,6 +196,9 @@ try:
     t = tablet()
     part = t.list_parts()[0]
     t.write_off("parts", part["id"], "Water damaged")
+    t.save_adjustment({"title": "Sales before the app", "quantity": 40, "revenue": 2000,
+                       "profit": 700})
+    t.update("devices", t_iphone, {"status": "Listed"})
     t.set_setting("list_brands", json.dumps(["Apple"]))
     t.close()
     do_sync()
@@ -204,6 +207,10 @@ try:
     assert p.get("parts", battery)["status"] == "Written Off"
     assert p.get_list("brands") == ["Apple"]
     assert p.setting("theme") == "light"
+    lump = next(x for x in p.list_sales() if x["item_kind"] == "adjustment")
+    assert (lump["quantity"], lump["profit"]) == (40, 700), lump
+    back = next(d for d in p.list_devices("working") if d["model"] == "iPhone 12")
+    assert back["status"] == "Listed" and back["listed_at"], "listing date syncs"
     p.close()
 
     # ------------------------------------------------------------------ 7. security

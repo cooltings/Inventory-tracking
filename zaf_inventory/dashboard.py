@@ -1,7 +1,8 @@
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QScrollArea, QToolTip, QVBoxLayout, QWidget)
+                               QListWidgetItem, QPushButton, QScrollArea, QToolTip, QVBoxLayout,
+                               QWidget)
 
 from . import theme
 from .db import device_title, num, part_title
@@ -141,6 +142,13 @@ class Dashboard(QWidget):
             self.cards[key] = card
             grid.addWidget(card, i // 4, i % 4)
         lay.addLayout(grid)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        adjust = QPushButton("Add Past Sales / Profit Adjustment...")
+        adjust.setToolTip("Add sales from before you used the app as one total")
+        adjust.clicked.connect(self._add_adjustment)
+        row.addWidget(adjust)
+        lay.addLayout(row)
 
         chart_frame = QFrame()
         chart_frame.setObjectName("card")
@@ -177,6 +185,11 @@ class Dashboard(QWidget):
         if target:
             self.open_item.emit(*target)
 
+    def _add_adjustment(self):
+        from .dialogs import AdjustmentDialog
+        if AdjustmentDialog(self.db, parent=self).exec():
+            self.refresh()
+
     def refresh(self):
         s = self.db.stats()
         c = theme.current
@@ -200,9 +213,13 @@ class Dashboard(QWidget):
                                 f"{d['n']} sales  ·  revenue {money(d['revenue'])}{margin}",
                                 good(d["profit"]))
         days = s["avg_days_to_sell"]
+        basis = f"From listed to sold, {s['days_listed_n']} phones"
+        if s["days_fallback_n"]:
+            basis += f" ({s['days_fallback_n']} more by date added, no listing date)"
         self.cards["speed"].set(f"{days:.0f}" if days is not None else "-",
-                                f"Last 30 days: {s['last30']['n']} sales, "
-                                f"{money(s['last30']['profit'])} profit")
+                                basis if s["days_listed_n"] or s["days_fallback_n"]
+                                else "Mark phones as Listed to start measuring")
+        self.cards["speed"].sub.setWordWrap(True)
         self.chart.set_series(s["monthly"])
 
         self.low.clear()

@@ -376,6 +376,80 @@ class SaleDialog(QDialog):
         self.accept()
 
 
+class AdjustmentDialog(QDialog):
+    """Past sales (or any correction) entered as one lump instead of phone by phone."""
+
+    def __init__(self, db, sale=None, parent=None):
+        super().__init__(parent)
+        self.db, self.sale = db, sale
+        self.setWindowTitle("Edit Past Sales" if sale else "Add Past Sales / Profit Adjustment")
+        self.resize(560, 420)
+        cur = UI["currency"]
+        lay = QVBoxLayout(self)
+        intro = QLabel("Add sales you made before using the app (or any correction) as one total. "
+                       "It counts in every profit and revenue figure, the running profit and, "
+                       "if you give it a date, that month in the chart.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        form = QFormLayout()
+        self.title = QLineEdit("Sales before Zaf Inventory")
+        self.dated = QCheckBox("Put it in a month")
+        self.date = QDateEdit(QDate.currentDate(), calendarPopup=True)
+        self.date.setDisplayFormat("dd/MM/yyyy")
+        self.dated.toggled.connect(self.date.setEnabled)
+        self.date.setEnabled(False)
+        drow = QHBoxLayout()
+        drow.addWidget(self.dated)
+        drow.addWidget(self.date, 1)
+        self.qty = QSpinBox()
+        self.qty.setRange(0, 1_000_000)
+        self.qty.setSuffix(" phones / items")
+        self.revenue = QDoubleSpinBox()
+        self.profit = QDoubleSpinBox()
+        for w in (self.revenue, self.profit):
+            w.setRange(-10_000_000, 10_000_000)
+            w.setDecimals(2)
+            w.setPrefix(cur)
+            w.setAlignment(Qt.AlignRight)
+        form.addRow("Description", self.title)
+        form.addRow("Date", drow)
+        form.addRow("Number sold", self.qty)
+        form.addRow("Total revenue (optional)", self.revenue)
+        form.addRow("Total profit", self.profit)
+        lay.addLayout(form)
+        hint = QLabel("Undated entries count in the all-time totals only. A loss can be entered "
+                      "as a negative profit.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        lay.addStretch(1)
+        if sale:
+            self.title.setText(sale.get("title") or "")
+            d = QDate.fromString(str(sale.get("sale_date") or "")[:10], "yyyy-MM-dd")
+            if d.isValid():
+                self.dated.setChecked(True)
+                self.date.setDate(d)
+            self.qty.setValue(int(num(sale.get("quantity"))))
+            self.revenue.setValue(num(sale.get("sale_price")))
+            self.profit.setValue(num(sale.get("profit")))
+        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._save)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def _save(self):
+        if not self.profit.value() and not self.revenue.value():
+            QMessageBox.information(self, "Past Sales", "Enter the total profit (and revenue if "
+                                                        "you know it).")
+            return
+        self.saved_id = self.db.save_adjustment({
+            "title": self.title.text(), "quantity": self.qty.value(),
+            "sale_date": self.date.date().toString("yyyy-MM-dd") if self.dated.isChecked() else "",
+            "revenue": self.revenue.value(), "profit": self.profit.value()},
+            sale_id=self.sale["id"] if self.sale else None)
+        self.accept()
+
+
 class ReturnDialog(QDialog):
     def __init__(self, sale, parent=None):
         super().__init__(parent)

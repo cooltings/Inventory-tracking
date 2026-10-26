@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
 from . import APP_ID, fileio, theme
 from .db import device_title, num, part_title, split_faults
 from .device_test import TestDialog, export_report
-from .dialogs import (ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog,
+from .dialogs import (AdjustmentDialog, ItemDialog, NotesDialog, ReturnDialog, SaleDialog, UsePartDialog,
                       restore_with_prompt)
 from .fields import (DEVICE_FIELDS, DEVICE_STATUSES, EXCLUDED_SALE_STATUSES, NUMERIC_KINDS,
                      PART_FIELDS, PART_STATUSES, SALE_FIELDS, WRITTEN_OFF)
@@ -37,6 +37,7 @@ TAB_CONFIG = {
         "columns": _columns(DEVICE_FIELDS, [("total_cost", "Total Cost", "money"),
                                             ("est_profit", "Est. Profit", "money"),
                                             ("age_days", "Days In Stock", "days"),
+                                            ("days_listed", "Days Listed", "days"),
                                             ("photo_count", "Photos", "int"),
                                             ("note_count", "Notes", "notes")]),
         "hidden": {"accessories", "ebay_item_id", "source", "repair_cost", "photo_count",
@@ -50,9 +51,11 @@ TAB_CONFIG = {
         "columns": _columns(DEVICE_FIELDS, [("total_cost", "Total Cost", "money"),
                                             ("est_profit", "Est. Profit", "money"),
                                             ("age_days", "Days In Stock", "days"),
+                                            ("days_listed", "Days Listed", "days"),
                                             ("photo_count", "Photos", "int"),
                                             ("note_count", "Notes", "notes")]),
         "hidden": {"accessories", "ebay_item_id", "source", "battery_health", "photo_count",
+                   "listed_at", "days_listed",
                    "purchase_date", "est_profit", "model_number", "ram", "battery_cycles",
                    "os_version", "test_summary"},
         "filters": [("brand", "Brands"), ("model", "Models"), ("faults", "Faults"),
@@ -65,7 +68,7 @@ TAB_CONFIG = {
                                           ("photo_count", "Photos", "int"),
                                           ("note_count", "Notes", "notes")]),
         "hidden": {"part_number", "min_qty", "source", "purchase_date", "ebay_item_id",
-                   "photo_count"},
+                   "photo_count", "listed_at"},
         "filters": [("part_type", "Part Types"), ("brand", "Brands"),
                     ("condition", "Conditions"), ("status", "Statuses"),
                     ("location", "Locations")],
@@ -73,6 +76,7 @@ TAB_CONFIG = {
     "sales": {
         "title": "Sold", "table": "sales", "entity": "sale",
         "columns": _columns(SALE_FIELDS, [("margin", "Margin", "pct1"),
+                                          ("days_to_sell", "Days to Sell", "days"),
                                           ("running_profit", "Running Profit", "money"),
                                           ("note_count", "Notes", "notes")]),
         "hidden": {"brand", "model", "postage_charged", "other_costs", "tracking", "serial"},
@@ -165,6 +169,10 @@ class RowsModel(QAbstractTableModel):
                 return int(Qt.AlignRight | Qt.AlignVCenter)
             return int(Qt.AlignLeft | Qt.AlignVCenter)
         if role == Qt.ToolTipRole:
+            if key == "days_to_sell" and row.get("days_basis") == "added":
+                return "No listing date recorded for this phone, so this counts from when it was bought / added"
+            if key == "days_to_sell" and row.get("days_basis") == "listed":
+                return "Counted from the date it was first listed"
             if key == "note_count" and row.get("latest_note"):
                 return "Latest note:\n" + row["latest_note"]
             if key in ("faults", "compatible", "title") and v:
@@ -517,9 +525,7 @@ class InventoryTab(QWidget):
     # ------------------------------------------------------------------ actions
     def add(self):
         if self.kind == "sales":
-            QMessageBox.information(self, "Record a Sale",
-                                    "To record a sale, select an item on the Working Phones, "
-                                    "Faulty or Parts tab and choose 'Mark as Sold' (Ctrl+S).")
+            self.add_adjustment()
             return
         dlg = ItemDialog(self.db, self.table_name, category=self.kind, parent=self)
         dlg.exec()
@@ -531,7 +537,9 @@ class InventoryTab(QWidget):
         r = self.current()
         if not r:
             return
-        if self.kind == "sales":
+        if self.kind == "sales" and r.get("item_kind") == "adjustment":
+            dlg = AdjustmentDialog(self.db, sale=self.db.get("sales", r["id"]), parent=self)
+        elif self.kind == "sales":
             dlg = SaleDialog(self.db, sale=self.db.get("sales", r["id"]), parent=self)
         else:
             dlg = ItemDialog(self.db, self.table_name, record=self.db.get(self.table_name, r["id"]),
@@ -593,9 +601,20 @@ class InventoryTab(QWidget):
         if dlg.exec():
             self._done(f"Sold {r.get('sku')}. See the Sold tab.")
 
+    def add_adjustment(self):
+        """Past sales entered as one total (to record a single sale use 'Mark as Sold')."""
+        dlg = AdjustmentDialog(self.db, parent=self)
+        if dlg.exec():
+            self._done("Past sales added to your totals.")
+            self.select_id(dlg.saved_id)
+
     def return_sale(self):
         r = self.current()
         if not r or self.kind != "sales":
+            return
+        if r.get("item_kind") == "adjustment":
+            QMessageBox.information(self, "Return / Refund", "This is a past-sales total, not a "
+                                    "single sale. Edit it to change the figures, or delete it.")
             return
         dlg = ReturnDialog(r, self)
         if dlg.exec():
@@ -782,6 +801,7 @@ class InventoryTab(QWidget):
             menu.addAction("Edit Sale...", self.edit)
             menu.addAction("Notes...", self.notes)
             menu.addAction("Return / Refund / Cancel...", self.return_sale)
+            menu.addAction("Add Past Sales / Profit Adjustment...", self.add_adjustment)
             menu.addSeparator()
             menu.addAction("Copy Order Number", lambda: self.copy_value("order_number"))
             menu.addAction("Copy IMEI", lambda: self.copy_value("imei"))

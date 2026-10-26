@@ -82,6 +82,10 @@ On macOS or Linux, run `./build_mac_linux.sh`, or run from source with `pip inst
 - **Generate PDF Report** (or **Ctrl+R** from the phone list) creates a printable report with all of that, an overall verdict, the failed items and their notes up front, then every test colour-coded with its notes.
 - Everything saves as you go. The **Tests** column in the phone list shows progress and any failures. Set your business name for the report header in Settings.
 
+**Days to sell:** measured from when a phone is first marked **Listed** until it sells. The app records the **Listed On** date automatically, and you can correct it on the item form. For phones listed before this was recorded, it uses the first "Set Status → Listed" entry in the Activity Log. If there isn't one, it falls back to the bought / added date, and the dashboard says how many sales used the fallback. The Sold tab has a **Days to Sell** column, and the stock tabs have **Days Listed**.
+
+**Past sales / profit adjustments:** on the Sold tab press **Add**, or use **Add Past Sales / Profit Adjustment...** on the Dashboard. Enter earlier sales as one total: how many phones, the revenue and the profit (negative for a loss). Give it a date to put it in that month, or leave it undated so it only counts towards all-time. It's included in every total and the running profit, it syncs, and you can edit or delete it like any sale.
+
 **Write-offs:** right-click an item and choose **Write Off...** (or set its status to *Written Off*).
 It stays on record with your reason as a note, greyed out, but is no longer counted in stock totals or
 stock value. The dashboard shows the total written off, and you can set it back to *In Stock* at any time.

@@ -79,6 +79,7 @@ jobs:
           python tests/test_device_tests.py
           python tests/test_sync.py
           python tests/test_files.py
+          python tests/test_listing_and_adjustments.py
 
       - name: Keep test output
         if: always()

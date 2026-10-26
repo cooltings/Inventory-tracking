@@ -192,8 +192,40 @@ class Database:
             CREATE INDEX IF NOT EXISTS ix_sales_date ON sales(sale_date);
         """)
         self._sync_schema()
+        self._listing_schema()
         c.commit()
         self._columns = {}
+
+    def _listing_schema(self):
+        """Record the date an item is first listed, whichever way its status changes."""
+        c = self.conn
+        for t in ("devices", "parts"):
+            c.executescript(f"""
+                CREATE TRIGGER IF NOT EXISTS listed_{t}_upd AFTER UPDATE OF status ON {t}
+                WHEN NEW.status = 'Listed' AND COALESCE(NEW.listed_at, '') = '' BEGIN
+                    UPDATE {t} SET listed_at = date('now', 'localtime') WHERE rowid = NEW.rowid;
+                END;
+                CREATE TRIGGER IF NOT EXISTS listed_{t}_ins AFTER INSERT ON {t}
+                WHEN NEW.status = 'Listed' AND COALESCE(NEW.listed_at, '') = '' BEGIN
+                    UPDATE {t} SET listed_at = date('now', 'localtime') WHERE rowid = NEW.rowid;
+                END;
+            """)
+        # one-off for items from before listing dates were kept: use the first
+        # "Set Status -> Listed" entry in the activity log where there is one
+        done = c.execute("SELECT value FROM settings WHERE key='migrated_listed_at'").fetchone()
+        if done is None:
+            for t, entity in (("devices", "device"), ("parts", "part")):
+                c.execute(f"""
+                    UPDATE {t} SET listed_at = (
+                        SELECT substr(min(a.ts), 1, 10) FROM activity a
+                        WHERE a.entity = '{entity}' AND a.entity_id = {t}.id
+                          AND a.action = 'Status' AND a.details LIKE '%-> Listed')
+                    WHERE COALESCE(listed_at, '') = '' AND EXISTS (
+                        SELECT 1 FROM activity a WHERE a.entity = '{entity}'
+                          AND a.entity_id = {t}.id AND a.action = 'Status'
+                          AND a.details LIKE '%-> Listed')""")
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('migrated_listed_at', ?)",
+                      (now_iso(),))
 
     def _sync_schema(self):
         c = self.conn
@@ -324,6 +356,7 @@ class Database:
             r["est_profit"] = round(num(r.get("list_price")) - r["total_cost"], 2) \
                 if r.get("list_price") else None
             r["written_off"] = r.get("status") == WRITTEN_OFF
+            r["days_listed"] = _age_days(r.get("listed_at"), today) if r.get("listed_at") else None
         return rows
 
     def list_parts(self):
@@ -338,8 +371,17 @@ class Database:
     def list_sales(self):
         rows = self._with_counts("sales", "sale")
         rows.sort(key=lambda r: (str(r.get("sale_date") or ""), r["id"]))
+        started = {d["id"]: dict(d) for d in self.conn.execute(
+            "SELECT id, listed_at, purchase_date, created_at FROM devices")}
         running = 0.0
         for r in rows:
+            r["days_to_sell"], r["days_basis"] = None, ""
+            dev = started.get(r.get("item_id")) if r.get("item_kind") == "device" else None
+            if dev and r.get("sale_date"):
+                start, basis = listing_start(dev)
+                days = _days_between(start, r["sale_date"])
+                if days is not None:
+                    r["days_to_sell"], r["days_basis"] = days, basis
             if r.get("status") not in EXCLUDED_SALE_STATUSES:
                 running += num(r.get("profit"))
             r["running_profit"] = round(running, 2)
@@ -467,6 +509,25 @@ class Database:
             self.log("Sold", kind, item_id,
                      f"{sale.get('sku')} {sale.get('title')} for "
                      f"{num(sale.get('sale_price')):.2f} (profit {sale['profit']:.2f})", commit=False)
+        return sale_id
+
+    def save_adjustment(self, data, sale_id=None):
+        """Past sales entered as one lump: counts in every profit / revenue total."""
+        revenue, profit = round(num(data.get("revenue")), 2), round(num(data.get("profit")), 2)
+        row = {"item_kind": "adjustment", "item_id": None, "sku": "ADJ",
+               "title": (data.get("title") or "Past sales").strip(),
+               "sale_date": data.get("sale_date") or "", "quantity": int(num(data.get("quantity"))),
+               "sale_price": revenue, "postage_charged": 0, "fees": 0, "postage_cost": 0,
+               "other_costs": 0, "cost_basis": round(revenue - profit, 2), "status": "Completed",
+               "platform": data.get("platform") or "", "brand": data.get("brand") or ""}
+        row["profit"] = calc_profit(row)
+        if sale_id:
+            self.update("sales", sale_id, row)
+            self.log("Edited", "sale", sale_id, f"Adjustment: {row['title']} ({row['profit']:.2f})")
+            return sale_id
+        sale_id = self.insert("sales", row)
+        self.log("Adjustment", "sale", sale_id, f"{row['title']}: {row['quantity']} sold, "
+                                                 f"profit {row['profit']:.2f}")
         return sale_id
 
     def update_sale(self, sale_id, data):
@@ -730,7 +791,8 @@ class Database:
         year_start = today.replace(month=1, day=1).isoformat()
 
         def sales_between(start=None, end=None):
-            q = f"""SELECT COUNT(*) n, COALESCE(SUM(sale_price+COALESCE(postage_charged,0)),0) revenue,
+            q = f"""SELECT COALESCE(SUM({UNITS}),0) n,
+                           COALESCE(SUM(sale_price+COALESCE(postage_charged,0)),0) revenue,
                            COALESCE(SUM(profit),0) profit FROM sales WHERE {valid}"""
             params = []
             if start:  # undated sales only count towards all-time totals
@@ -763,15 +825,23 @@ class Database:
         out["monthly"] = series
 
         out["brands"] = [dict(x) for x in c.execute(f"""
-            SELECT COALESCE(NULLIF(brand,''),'(none)') brand, COUNT(*) n,
+            SELECT COALESCE(NULLIF(brand,''),'(none)') brand, SUM({UNITS}) n,
                    SUM(sale_price) revenue, SUM(profit) profit
-            FROM sales WHERE {valid} GROUP BY 1 ORDER BY profit DESC LIMIT 10""")]
+            FROM sales WHERE {valid} AND COALESCE(item_kind, '') != 'adjustment'
+            GROUP BY 1 ORDER BY profit DESC LIMIT 10""")]
 
-        # average days from purchase to sale for devices
-        r = c.execute(f"""SELECT AVG(MAX(0, julianday(s.sale_date) - julianday(COALESCE(d.purchase_date, substr(d.created_at,1,10))))) days
+        # average days from listing to sale for phones (falls back to the bought / added
+        # date for phones sold before listing dates were recorded)
+        r = c.execute(f"""SELECT AVG(MAX(0, julianday(s.sale_date) - julianday(COALESCE(
+                                   NULLIF(d.listed_at, ''), d.purchase_date, substr(d.created_at,1,10))))) days,
+                                 SUM(COALESCE(d.listed_at, '') != '') listed,
+                                 SUM(COALESCE(d.listed_at, '') = '') fallback
                           FROM sales s JOIN devices d ON s.item_kind='device' AND d.id=s.item_id
-                          WHERE {valid.replace('status', 's.status')}""").fetchone()
+                          WHERE {valid.replace('status', 's.status')} AND COALESCE(s.sale_date,'') != ''
+                          """).fetchone()
         out["avg_days_to_sell"] = r["days"]
+        out["days_listed_n"] = r["listed"] or 0
+        out["days_fallback_n"] = r["fallback"] or 0
 
         cutoff = (today - dt.timedelta(days=aged)).isoformat()
         out["aged"] = [dict(x) for x in c.execute("""
@@ -787,6 +857,24 @@ class Database:
     def vacuum(self):
         self.conn.commit()
         self.conn.execute("VACUUM")
+
+
+UNITS = "CASE WHEN item_kind = 'adjustment' THEN COALESCE(quantity, 0) ELSE 1 END"
+
+
+def listing_start(device) -> tuple:
+    """(date, basis) that days-to-sell counts from: when it was listed, else bought / added."""
+    if device.get("listed_at"):
+        return str(device["listed_at"])[:10], "listed"
+    return str(device.get("purchase_date") or device.get("created_at") or "")[:10], "added"
+
+
+def _days_between(start, end):
+    try:
+        return max(0, (dt.date.fromisoformat(str(end)[:10])
+                       - dt.date.fromisoformat(str(start)[:10])).days)
+    except ValueError:
+        return None
 
 
 def _age_days(date_text, today):

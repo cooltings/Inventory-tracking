@@ -205,7 +205,9 @@ class MainWindow(QMainWindow):
         inv = isinstance(tab, InventoryTab)
         kind = tab.kind if inv else None
         devices = kind in ("working", "faulty")
-        self.a_add.setEnabled(inv and kind != "sales" or tab is self.sheets)
+        self.a_add.setEnabled(inv or tab is self.sheets)
+        self.a_add.setToolTip("Add past sales / a profit adjustment" if kind == "sales"
+                              else "Add a new item  (Ctrl+N)")
         for a in (self.a_edit, self.a_notes, self.a_delete, self.a_export, self.a_import):
             a.setEnabled(inv)
         self.a_export.setEnabled(inv or tab is self.sheets)
