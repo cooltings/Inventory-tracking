@@ -1,0 +1,31 @@
+name: Feature request
+description: Something new for the app, or a change to how something works
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Stock / parts / write-offs
+        - Sales, profit or fees
+        - Device testing or PDF reports
+        - Sync between PC and tablet
+        - Android / DeX
+        - Backups, import / export
+        - Dashboard, sheets or fee calculator
+        - Something new
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe it in your own words, and what it would save you or let you do.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example (optional)
+      description: A sketch, screenshot, spreadsheet or another app that does it.

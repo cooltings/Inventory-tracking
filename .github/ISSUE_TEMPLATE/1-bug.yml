@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in the app is wrong, crashes or shows the wrong numbers
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Stock / parts / write-offs
+        - Sales, profit or fees
+        - Device testing or PDF reports
+        - Sync between PC and tablet
+        - Backups, restore or CSV import / export
+        - Dashboard, sheets or fee calculator
+        - Somewhere else
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Which device?
+      options:
+        - Windows PC
+        - Android tablet (normal)
+        - Android tablet (Samsung DeX)
+        - Mac
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Help → About shows it
+      placeholder: "1.3.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen again
+      placeholder: |
+        1. Go to the Sold tab
+        2. Double-click a sale
+        3. ...
+  - type: textarea
+    id: log
+    attributes:
+      label: Error details (if any)
+      description: Paste the error message, or the contents of error.log from the data folder (File → Open Data Folder on the PC).
+      render: text

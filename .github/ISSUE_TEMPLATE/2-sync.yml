@@ -1,0 +1,45 @@
+name: Sync problem
+description: The PC and tablet won't sync, or data didn't come across
+labels: ["bug", "area: sync"]
+body:
+  - type: dropdown
+    id: problem
+    attributes:
+      label: What's wrong?
+      options:
+        - Find PC doesn't find the PC
+        - Sync fails with an error
+        - Wrong pairing code message
+        - Something didn't sync across
+        - Something synced wrongly (duplicated, came back after deleting...)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: App version on the PC and on the tablet
+      placeholder: "PC 1.3.0, tablet 1.3.0"
+    validations:
+      required: true
+  - type: textarea
+    id: message
+    attributes:
+      label: The message shown
+      description: Copy the text from the Sync screen (bottom of the window) if there is one.
+      render: text
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Which item(s), what you changed on which device, and what you expected to see.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Quick checks
+      options:
+        - label: Both devices are on the same Wi-Fi
+        - label: '"Allow other devices to sync" is ticked on the PC'
+        - label: Windows Firewall allowed Zaf Inventory on private networks

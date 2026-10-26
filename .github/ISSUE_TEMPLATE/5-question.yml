@@ -1,0 +1,10 @@
+name: Question
+description: Not sure how to do something in the app
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
