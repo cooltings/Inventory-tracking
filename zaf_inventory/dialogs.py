@@ -752,6 +752,7 @@ class BackupDialog(QDialog):
                    ("Verify", self._verify), ("Restore Selected", self._restore_selected),
                    ("Restore From File...", self._restore_file), ("Open Folder", self._open),
                    ("Delete", self._delete)]
+        buttons = []
         for text, fn in actions:
             if text == "Open Folder" and is_android():
                 continue  # app storage can't be browsed on Android
@@ -759,8 +760,17 @@ class BackupDialog(QDialog):
             b.clicked.connect(fn)
             if text == "Back Up Now":
                 b.setProperty("primary", True)
-            row.addWidget(b)
-        lay.addLayout(row)
+            buttons.append(b)
+        from . import theme
+        if theme.compact():   # two rows so the dialog fits a tablet
+            grid = QGridLayout()
+            for n, b in enumerate(buttons):
+                grid.addWidget(b, n // 4, n % 4)
+            lay.addLayout(grid)
+        else:
+            for b in buttons:
+                row.addWidget(b)
+            lay.addLayout(row)
         close = QPushButton("Close")
         close.clicked.connect(self.accept)
         lay.addLayout(_button_row(close))

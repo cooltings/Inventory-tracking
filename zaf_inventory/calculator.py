@@ -1,7 +1,8 @@
 """eBay fees & profit calculator."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QDoubleSpinBox, QFormLayout, QFrame, QGridLayout, QGroupBox,
-                               QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
+                               QWidget)
 
 from . import theme
 from .db import num
@@ -38,7 +39,15 @@ class FeeCalculatorTab(QWidget):
     def __init__(self, db, parent=None):
         super().__init__(parent)
         self.db = db
-        outer = QHBoxLayout(self)
+        content = QWidget()
+        scroll = QScrollArea()   # scrolls instead of forcing the window taller on tablets
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        page = QVBoxLayout(self)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.addWidget(scroll)
+        outer = QHBoxLayout(content)
         outer.setContentsMargins(16, 16, 16, 16)
 
         left = QVBoxLayout()

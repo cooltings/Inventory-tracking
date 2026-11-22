@@ -80,6 +80,7 @@ jobs:
           python tests/test_sync.py
           python tests/test_files.py
           python tests/test_listing_and_adjustments.py
+          python tests/test_joblots_sku_layout.py
 
       - name: Keep test output
         if: always()

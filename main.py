@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from zaf_inventory import APP_ID, APP_NAME
 from zaf_inventory.db import Database
 from zaf_inventory.main_window import MainWindow
-from zaf_inventory.paths import data_dir, db_path
+from zaf_inventory.paths import data_dir, db_path, is_android
 from zaf_inventory.theme import app_icon, apply_theme
 
 
@@ -42,7 +42,10 @@ def main():
         return 1
     apply_theme(app, db.setting("theme"))
     win = MainWindow(db)
-    win.show()
+    if is_android():
+        win.showMaximized()
+    else:
+        win.show()
     return app.exec()
 
 

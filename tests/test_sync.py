@@ -199,6 +199,8 @@ try:
     t.save_adjustment({"title": "Sales before the app", "quantity": 40, "revenue": 2000,
                        "profit": 700})
     t.update("devices", t_iphone, {"status": "Listed"})
+    lot = t.save_joblot({"name": "Tablet lot", "total_cost": 90})
+    t.add_to_joblot(lot, [("devices", t_iphone)])
     t.set_setting("list_brands", json.dumps(["Apple"]))
     t.close()
     do_sync()
@@ -211,6 +213,9 @@ try:
     assert (lump["quantity"], lump["profit"]) == (40, 700), lump
     back = next(d for d in p.list_devices("working") if d["model"] == "iPhone 12")
     assert back["status"] == "Listed" and back["listed_at"], "listing date syncs"
+    pc_lot = p.joblots()[0]
+    assert pc_lot["name"] == "Tablet lot" and back["joblot_uid"] == pc_lot["uid"], "job lots sync"
+    assert back["purchase_price"] == 90 and back["joblot_name"] == "Tablet lot"
     p.close()
 
     # ------------------------------------------------------------------ 7. security

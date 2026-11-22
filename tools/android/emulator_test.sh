@@ -25,3 +25,18 @@ if grep -q "NOT RUNNING" "$OUT/pid.txt"; then
   grep -E "FATAL|UnsatisfiedLinkError|Traceback|Error" "$OUT/logcat.txt" | grep -i -E "zaf|python|qt|shiboken" | head -20
   exit 1
 fi
+
+# Galaxy Tab S10 Lite: 2112 x 1320 screen. Relaunch at its resolution with normal (240 dpi)
+# and the largest (320 dpi) display scaling, and keep screenshots of both.
+for d in 240 320; do
+  adb shell wm size 2112x1320
+  adb shell wm density "$d"
+  adb shell am force-stop "$PKG"
+  sleep 3
+  adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
+  sleep 45
+  adb exec-out screencap -p > "$OUT/tab-s10-lite-${d}dpi.png"
+  adb shell pidof "$PKG" > /dev/null || { echo "App stopped at ${d} dpi"; exit 1; }
+done
+adb shell wm size reset
+adb shell wm density reset

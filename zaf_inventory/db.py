@@ -1,6 +1,7 @@
 """SQLite storage layer. No Qt imports here so it can be tested on its own."""
 import datetime as dt
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -42,13 +43,14 @@ SKU_PREFIX = {"working": "WP", "faulty": "FD", "parts": "PT"}
 # every device) and a "sync_ts" (UTC time of the last change), both maintained by
 # triggers so every write path is covered; deletes are recorded in sync_deleted.
 SYNC_TABLES = ("devices", "parts", "sales", "notes", "photos", "sheets", "sheet_rows",
-               "device_tests", "device_test_meta", "settings", "activity")
+               "device_tests", "device_test_meta", "settings", "activity", "joblots")
 SYNC_NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 LEGACY_TS = "2000-01-01T00:00:00.000"
 
 _EXTRA_COLUMNS = {
-    "devices": [("category", "TEXT NOT NULL DEFAULT 'working'"), ("sold_at", "TEXT")],
-    "parts": [],
+    "devices": [("category", "TEXT NOT NULL DEFAULT 'working'"), ("sold_at", "TEXT"),
+                ("joblot_uid", "TEXT"), ("joblot_units", "INTEGER")],
+    "parts": [("joblot_uid", "TEXT"), ("joblot_units", "INTEGER")],
     "sales": [("item_kind", "TEXT"), ("item_id", "INTEGER")],
 }
 _FIELDS = {"devices": DEVICE_FIELDS, "parts": PART_FIELDS, "sales": SALE_FIELDS}
@@ -171,6 +173,10 @@ class Database:
                 ts TEXT NOT NULL, action TEXT, entity TEXT, entity_id INTEGER,
                 details TEXT);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS joblots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, purchase_date TEXT,
+                source TEXT, total_cost REAL DEFAULT 0, split TEXT DEFAULT 'even', notes TEXT,
+                created_at TEXT, updated_at TEXT);
             CREATE TABLE IF NOT EXISTS device_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id INTEGER NOT NULL, test_key TEXT NOT NULL,
@@ -193,8 +199,23 @@ class Database:
         """)
         self._sync_schema()
         self._listing_schema()
+        self._repaired_sku_migration()
         c.commit()
         self._columns = {}
+
+    def _repaired_sku_migration(self):
+        """One-off: phones already moved between sections get the SKU they'd get now."""
+        c = self.conn
+        if c.execute("SELECT 1 FROM settings WHERE key='migrated_repaired_sku'").fetchone():
+            return
+        for row in c.execute("SELECT id, sku, category FROM devices WHERE "
+                             "(category='working' AND sku LIKE 'FD-%') OR "
+                             "(category='faulty' AND sku LIKE 'WP-%')").fetchall():
+            new = sku_for_section(row["sku"], row["category"])
+            if new != row["sku"]:
+                c.execute("UPDATE devices SET sku=? WHERE id=?", (new, row["id"]))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('migrated_repaired_sku', ?)",
+                  (now_iso(),))
 
     def _listing_schema(self):
         """Record the date an item is first listed, whichever way its status changes."""
@@ -343,6 +364,7 @@ class Database:
         rows = self._with_counts("devices", "device",
                                  "t.category=? AND COALESCE(t.status,'') != 'Sold'", (category,))
         today = dt.date.today()
+        lots = self.joblot_pl_map()
         tested = {}
         for t in self.conn.execute("SELECT device_id, test_key, result FROM device_tests"):
             tested.setdefault(t["device_id"], {})[t["test_key"]] = {"result": t["result"]}
@@ -357,15 +379,20 @@ class Database:
                 if r.get("list_price") else None
             r["written_off"] = r.get("status") == WRITTEN_OFF
             r["days_listed"] = _age_days(r.get("listed_at"), today) if r.get("listed_at") else None
+            lot = lots.get(("devices", r["id"]))
+            r["joblot_name"], r["lot_pl"] = (lot[0], lot[1]) if lot else ("", None)
         return rows
 
     def list_parts(self):
         rows = self._with_counts("parts", "part")
+        lots = self.joblot_pl_map()
         for r in rows:
             qty = int(num(r.get("quantity")))
             r["stock_value"] = round(qty * num(r.get("unit_cost")), 2)
             r["written_off"] = r.get("status") == WRITTEN_OFF
             r["low_stock"] = not r["written_off"] and qty <= int(num(r.get("min_qty"), 0))
+            lot = lots.get(("parts", r["id"]))
+            r["joblot_name"], r["lot_pl"] = (lot[0], lot[1]) if lot else ("", None)
         return rows
 
     def list_sales(self):
@@ -595,11 +622,171 @@ class Database:
             status = "In Stock"
         if category == "faulty" and status in ("In Stock", "Listed"):
             status = "Awaiting Repair"
+        old_sku = device.get("sku") or ""
+        new_sku = sku_for_section(old_sku, category)
         with self.conn:
-            self.update("devices", device_id, {"category": category, "status": status}, commit=False)
+            self.update("devices", device_id, {"category": category, "status": status,
+                                               "sku": new_sku}, commit=False)
             label = "Working Phones" if category == "working" else "Faulty / Repairs"
-            self.add_note("device", device_id, f"Moved to {label}.", commit=False)
-            self.log("Moved", "device", device_id, f"{device.get('sku')} -> {label}", commit=False)
+            change = f" SKU {old_sku} -> {new_sku}." if new_sku != old_sku else ""
+            self.add_note("device", device_id, f"Moved to {label}.{change}", commit=False)
+            self.log("Moved", "device", device_id, f"{old_sku} -> {label}{change}", commit=False)
+
+    # ------------------------------------------------------------------ job lots
+    def joblots(self):
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM joblots ORDER BY COALESCE(purchase_date, created_at) DESC, id DESC")]
+
+    def joblot(self, lot_id):
+        row = self.conn.execute("SELECT * FROM joblots WHERE id=?", (lot_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_joblot(self, data, lot_id=None):
+        data = {k: data.get(k) for k in ("name", "purchase_date", "source", "total_cost",
+                                          "split", "notes") if k in data}
+        if lot_id:
+            self.update("joblots", lot_id, data)
+        else:
+            data.setdefault("split", "even")
+            lot_id = self.insert("joblots", data)
+            self.log("Job lot", "joblot", lot_id,
+                     f"Created {data.get('name')} ({num(data.get('total_cost')):.2f})")
+        self.reallocate_joblot(lot_id)
+        return lot_id
+
+    def delete_joblot(self, lot_id):
+        lot = self.joblot(lot_id)
+        if not lot:
+            return
+        with self.conn:
+            for t in ("devices", "parts"):
+                self.conn.execute(f"UPDATE {t} SET joblot_uid=NULL, joblot_units=NULL "
+                                  "WHERE joblot_uid=?", (lot["uid"],))
+            self.conn.execute("DELETE FROM joblots WHERE id=?", (lot_id,))
+            self.log("Job lot", "joblot", lot_id, f"Deleted {lot['name']} (items kept)",
+                     commit=False)
+
+    def add_to_joblot(self, lot_id, items):
+        """items: [(table, id)] with table 'devices' or 'parts'."""
+        lot = self.joblot(lot_id)
+        with self.conn:
+            for table, item_id in items:
+                item = self.get(table, item_id)
+                units = max(1, int(num(item.get("quantity"), 1)))
+                self.update(table, item_id, {"joblot_uid": lot["uid"], "joblot_units": units},
+                            commit=False)
+                self.add_note("device" if table == "devices" else "part", item_id,
+                              f"Added to job lot: {lot['name']}", commit=False)
+            self.log("Job lot", "joblot", lot_id, f"Added {len(items)} item(s) to {lot['name']}",
+                     commit=False)
+        self.reallocate_joblot(lot_id)
+
+    def remove_from_joblot(self, table, item_id):
+        item = self.get(table, item_id)
+        lot = self.conn.execute("SELECT id FROM joblots WHERE uid=?",
+                                (item.get("joblot_uid"),)).fetchone()
+        self.update(table, item_id, {"joblot_uid": None, "joblot_units": None})
+        if lot:
+            self.reallocate_joblot(lot["id"])
+
+    def _lot_rows(self, lot_uid):
+        rows = []
+        for table in ("devices", "parts"):
+            for r in self.conn.execute(f"SELECT * FROM {table} WHERE joblot_uid=? ORDER BY id",
+                                       (lot_uid,)):
+                rows.append({"table": table, **dict(r)})
+        return rows
+
+    def reallocate_joblot(self, lot_id):
+        """Share the lot price across its items and re-cost any sales of them."""
+        lot = self.joblot(lot_id)
+        if not lot or lot.get("split") == "manual":
+            return
+        rows = self._lot_rows(lot["uid"])
+        if not rows:
+            return
+        units = [max(1, int(num(r.get("joblot_units"), 1))) for r in rows]
+        if lot.get("split") == "list":
+            prices = [num(r.get("list_price")) for r in rows]
+            known = [p for p in prices if p > 0]
+            fill = sum(known) / len(known) if known else 1.0
+            weights = [p if p > 0 else fill for p in prices]
+        else:
+            weights = [1.0] * len(rows)
+        denom = sum(w * u for w, u in zip(weights, units)) or 1.0
+        total = num(lot.get("total_cost"))
+        with self.conn:
+            for r, w in zip(rows, weights):
+                unit_cost = round(total * w / denom, 2)
+                col = "purchase_price" if r["table"] == "devices" else "unit_cost"
+                if round(num(r.get(col)), 2) != unit_cost:
+                    self.update(r["table"], r["id"], {col: unit_cost}, commit=False)
+                repair = num(r.get("repair_cost")) if r["table"] == "devices" else 0.0
+                kind = "device" if r["table"] == "devices" else "part"
+                for s in self.conn.execute("SELECT * FROM sales WHERE item_kind=? AND item_id=?",
+                                           (kind, r["id"])).fetchall():
+                    s = dict(s)
+                    s["cost_basis"] = round((unit_cost + repair) * max(1, int(num(s.get("quantity"), 1))), 2)
+                    self.update("sales", s["id"], {"cost_basis": s["cost_basis"],
+                                                   "profit": calc_profit(s)}, commit=False)
+
+    def joblot_report(self, lot_id):
+        """Every item in a lot with its profit / loss, plus the lot totals."""
+        lot = self.joblot(lot_id)
+        fee_pct, fee_fixed = num(self.setting("fee_percent")), num(self.setting("fee_fixed"))
+        items, tot = [], {"paid": num(lot.get("total_cost")), "repairs": 0.0, "net_sales": 0.0,
+                          "units": 0, "sold_units": 0, "remaining_value": 0.0}
+        excl = tuple(EXCLUDED_SALE_STATUSES)
+        for r in self._lot_rows(lot["uid"]):
+            kind = "device" if r["table"] == "devices" else "part"
+            units = max(1, int(num(r.get("joblot_units"), 1)))
+            unit_cost = num(r.get("purchase_price" if kind == "device" else "unit_cost"))
+            repair = num(r.get("repair_cost")) if kind == "device" else 0.0
+            sold_units, net = 0, 0.0
+            for s in self.conn.execute(
+                    f"SELECT * FROM sales WHERE item_kind=? AND item_id=? AND COALESCE(status,'') "
+                    f"NOT IN ({','.join('?' for _ in excl)})", (kind, r["id"], *excl)):
+                sold_units += max(1, int(num(s["quantity"], 1)))
+                net += (num(s["sale_price"]) + num(s["postage_charged"]) - num(s["fees"])
+                        - num(s["postage_cost"]) - num(s["other_costs"]))
+            sold_units = min(sold_units, units)
+            remaining = 0 if r.get("status") in ("Sold", WRITTEN_OFF) else units - sold_units
+            cost = (unit_cost + repair) * units
+            list_price = num(r.get("list_price"))
+            est = 0.0
+            if remaining and list_price:
+                est = remaining * (list_price - list_price * fee_pct / 100 - fee_fixed)
+            pl = round(net + est - cost, 2)
+            if kind == "device":
+                title, where = device_title(r), ("Sold" if r.get("status") == "Sold" else
+                                                 "Working" if r.get("category") == "working" else "Faulty")
+            else:
+                title, where = part_title(r), "Parts"
+            if r.get("status") == WRITTEN_OFF:
+                where = "Written off"
+            items.append({"table": r["table"], "id": r["id"], "sku": r.get("sku"), "title": title,
+                          "where": where, "units": units, "unit_cost": unit_cost, "repairs": repair,
+                          "cost": round(cost, 2), "sold_units": sold_units, "net_sales": round(net, 2),
+                          "remaining": remaining, "pl": pl, "estimated": bool(remaining and list_price),
+                          "unpriced": bool(remaining and not list_price)})
+            tot["repairs"] += repair * units
+            tot["net_sales"] += net
+            tot["units"] += units
+            tot["sold_units"] += sold_units
+            tot["remaining_value"] += est
+        tot["pl_so_far"] = round(tot["net_sales"] - tot["paid"] - tot["repairs"], 2)
+        tot["pl_potential"] = round(tot["pl_so_far"] + tot["remaining_value"], 2)
+        tot["allocated"] = round(sum(i["unit_cost"] * i["units"] for i in items), 2)
+        return {"lot": lot, "items": items, "totals": tot}
+
+    def joblot_pl_map(self):
+        """{(table, id): (lot name, P/L, estimated)} for the stock tabs."""
+        out = {}
+        for lot in self.joblots():
+            rep = self.joblot_report(lot["id"])
+            for i in rep["items"]:
+                out[(i["table"], i["id"])] = (lot["name"], i["pl"], i["estimated"])
+        return out
 
     # ------------------------------------------------------------------ sheets (ledgers)
     SHEET_COLUMNS = ("row_date", "description", "category", "reference",
@@ -857,6 +1044,15 @@ class Database:
     def vacuum(self):
         self.conn.commit()
         self.conn.execute("VACUUM")
+
+
+def sku_for_section(sku, category) -> str:
+    """WP-/FD- prefix for the section; phones moved to Working from Faulty get "-R"
+    (repaired). Custom SKUs that don't follow the pattern are left alone."""
+    m = re.match(r"^(WP|FD)-(.+?)(-R)?$", str(sku or ""))
+    if not m:
+        return sku
+    return f"WP-{m.group(2)}-R" if category == "working" else f"FD-{m.group(2)}"
 
 
 UNITS = "CASE WHEN item_kind = 'adjustment' THEN COALESCE(quantity, 0) ELSE 1 END"

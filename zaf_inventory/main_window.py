@@ -10,6 +10,7 @@ from .db import num
 from .dialogs import (BackupDialog, GlobalSearchDialog, SettingsDialog, choose_backup_file,
                       restore_with_prompt)
 from .paths import data_dir, is_android, is_portable
+from .joblots import JobLotsTab
 from .sheets import SheetsTab
 from .sync import SyncError
 from .sync_ui import SyncController, SyncDialog, describe
@@ -19,11 +20,11 @@ from .widgets import UI, fmt_ts
 SHORTCUTS = """
 <b>Ctrl+N</b> Add item &nbsp; <b>Enter</b> Edit &nbsp; <b>Del</b> Delete<br>
 <b>Ctrl+M</b> Notes &amp; photos &nbsp; <b>Ctrl+S</b> Mark as sold<br>
-<b>Ctrl+T</b> Test device &nbsp; <b>Ctrl+R</b> Test report PDF<br>
+<b>Ctrl+J</b> Add to job lot &nbsp; <b>Ctrl+T</b> Test device &nbsp; <b>Ctrl+R</b> Test report PDF<br>
 <b>Ctrl+U</b> Use part on device &nbsp; <b>Ctrl+D</b> Duplicate<br>
 <b>Ctrl+F</b> Search this tab &nbsp; <b>Ctrl+K</b> Search everything<br>
 <b>Ctrl+Shift+I</b> Import backup .zip<br>
-<b>Ctrl+Y</b> Sync &nbsp; <b>Ctrl+B</b> Back up now &nbsp; <b>F5</b> Refresh &nbsp; <b>Ctrl+1..8</b> Switch tab<br>
+<b>Ctrl+Y</b> Sync &nbsp; <b>Ctrl+B</b> Back up now &nbsp; <b>F5</b> Refresh &nbsp; <b>Ctrl+1..9</b> Switch tab<br>
 <b>Ctrl+C</b> Copy selected rows (paste into Excel / Sheets)<br>
 Right-click a column heading to show / hide columns.
 """
@@ -52,6 +53,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.inv["faulty"], "Faulty / Repairs")
         self.tabs.addTab(self.inv["parts"], "Parts")
         self.tabs.addTab(self.inv["sales"], "Sold")
+        self.joblots = JobLotsTab(db)
+        self.joblots.open_item.connect(self.jump_to)
+        self.joblots.changed.connect(self._data_changed)
+        self.tabs.addTab(self.joblots, "Job Lots")
         self.tabs.addTab(self.sheets, "Sheets")
         self.tabs.addTab(self.calc, "Fee Calculator")
         self.tabs.addTab(self.activity, "Activity Log")
@@ -65,10 +70,16 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.backup_label)
         self._update_backup_label()
 
+        self._fit = theme.FitToScreen(self)
+        QApplication.instance().installEventFilter(self._fit)
         settings = QSettings(APP_ID, APP_ID)
         geo = settings.value("window/geometry")
-        if geo is not None:
+        if geo is not None and not is_android():
             self.restoreGeometry(geo)
+        screen = self.screen()
+        if screen is not None:   # never open bigger than the screen
+            g = screen.availableGeometry()
+            self.resize(min(self.width(), g.width()), min(self.height(), g.height()))
         self.tabs.setCurrentIndex(int(settings.value("window/tab", 0)))
         self._tab_changed(self.tabs.currentIndex())
 
@@ -119,6 +130,8 @@ class MainWindow(QMainWindow):
         self.a_return = self._act("Return/Refund", t("return_sale"), None,
                                   "Mark a sale returned / refunded")
         self.a_dup = self._act("Duplicate", t("duplicate"), "Ctrl+D")
+        self.a_joblot = self._act("Add to Job Lot", t("add_to_joblot"), "Ctrl+J",
+                                  "Add the selected items to a job lot (bought together)")
         self.a_writeoff = self._act("Write Off...", t("write_off"), None,
                                     "Write off the selected items (kept on record, not counted)")
         self.a_delete = self._act("Delete", t("delete"), None, "Delete the selected items")
@@ -137,7 +150,7 @@ class MainWindow(QMainWindow):
         self.a_export = self._act("Export CSV...", t("export_csv"), "Ctrl+E")
         self.a_import = self._act("Import CSV...", t("import_csv"), "Ctrl+I")
         self.a_refresh = self._act("Refresh", self.refresh_all, "F5")
-        for i in range(8):
+        for i in range(9):
             self._act(f"Tab {i + 1}", lambda _=False, i=i: self.tabs.setCurrentIndex(i),
                       f"Ctrl+{i + 1}")
 
@@ -146,7 +159,7 @@ class MainWindow(QMainWindow):
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.addToolBar(tb)
         for a in (self.a_add, self.a_edit, self.a_notes, self.a_test, self.a_report, self.a_sell,
-                  self.a_part, self.a_move,
+                  self.a_joblot, self.a_part, self.a_move,
                   self.a_return, self.a_calc, self.a_delete):
             tb.addAction(a)
         tb.addSeparator()
@@ -176,7 +189,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_settings)
         m = mb.addMenu("&Item")
         for a in (self.a_notes, self.a_test, self.a_report, self.a_sell, self.a_part, self.a_move,
-                  self.a_return, self.a_calc, self.a_writeoff):
+                  self.a_return, self.a_calc, self.a_joblot, self.a_writeoff):
             m.addAction(a)
         m = mb.addMenu("&View")
         m.addAction(self.a_search)
@@ -214,6 +227,7 @@ class MainWindow(QMainWindow):
         self.a_sell.setEnabled(inv and kind != "sales")
         self.a_dup.setEnabled(inv and kind != "sales")
         self.a_writeoff.setEnabled(inv and kind != "sales")
+        self.a_joblot.setEnabled(inv and kind != "sales")
         self.a_part.setEnabled(devices)
         self.a_test.setEnabled(devices)
         self.a_report.setEnabled(devices)
@@ -227,6 +241,8 @@ class MainWindow(QMainWindow):
             self.activity.refresh()
         elif tab is self.sheets:
             self.sheets.load_rows()
+        elif tab is self.joblots:
+            self.joblots.refresh()
         elif tab is self.calc:
             self.calc.load_defaults()
         elif inv:
@@ -236,11 +252,14 @@ class MainWindow(QMainWindow):
         for tab in self.inv.values():
             if tab is not self.tabs.currentWidget():
                 tab.refresh()
+        if self.joblots is not self.tabs.currentWidget():
+            self.joblots.refresh()
 
     def refresh_all(self):
         UI["currency"] = self.db.setting("currency")
         for tab in self.inv.values():
             tab.refresh()
+        self.joblots.refresh()
         self.sheets.refresh()
         self._tab_changed(self.tabs.currentIndex())
         self._update_backup_label()

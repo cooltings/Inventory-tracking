@@ -41,7 +41,7 @@ class ResultButtons(QWidget):
             b = QPushButton(name)
             b.setCheckable(True)
             b.setFocusPolicy(Qt.NoFocus)  # keep the keyboard on the table
-            b.setFixedHeight(24)
+            b.setFixedHeight(34 if theme.touch() else 24)
             c = RESULT_COLOURS[name]
             b.setStyleSheet(
                 "QPushButton { padding: 1px 8px; border-radius: 4px; min-width: 32px; }"
@@ -138,6 +138,7 @@ class TestDialog(QDialog):
         self.progress.setFixedHeight(10)
         self.progress.setFixedWidth(180)
         self.stats = QLabel()
+        self.stats.setWordWrap(True)
         foot.addWidget(self.progress)
         foot.addWidget(self.stats, 1)
         self.pdf_btn = QPushButton("Generate PDF Report...")
@@ -165,6 +166,9 @@ class TestDialog(QDialog):
         self.filter.currentIndexChanged.connect(self._apply_filter)
         bar.addWidget(self.search, 1)
         bar.addWidget(self.filter)
+        if theme.compact():   # buttons on their own row so the dialog fits a tablet
+            lay.addLayout(bar)
+            bar = QHBoxLayout()
         for text, fn, tip in (
                 ("Auto N/A", self.auto_na, "Mark features this phone can't have as N/A "
                                            "(e.g. iCloud lock on Android, FRP on iPhone)"),
@@ -181,7 +185,7 @@ class TestDialog(QDialog):
         self.table = CheckTable(0, 3)
         self.table.setHorizontalHeaderLabels(["Test", "Result", "Notes (double-click to edit)"])
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(32)
+        self.table.verticalHeader().setDefaultSectionSize(42 if theme.touch() else 32)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)

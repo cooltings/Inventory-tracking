@@ -6,7 +6,7 @@ import io
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSettings, QSortFilterProxyModel,
                             Qt, Signal)
 from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGridLayout,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu,
                                QMessageBox,
                                QPushButton, QTableView, QVBoxLayout, QWidget)
@@ -36,6 +36,8 @@ TAB_CONFIG = {
         "title": "Working Phones", "table": "devices", "entity": "device",
         "columns": _columns(DEVICE_FIELDS, [("total_cost", "Total Cost", "money"),
                                             ("est_profit", "Est. Profit", "money"),
+                                            ("joblot_name", "Job Lot", "text"),
+                                            ("lot_pl", "Lot P/L", "money"),
                                             ("age_days", "Days In Stock", "days"),
                                             ("days_listed", "Days Listed", "days"),
                                             ("photo_count", "Photos", "int"),
@@ -50,6 +52,8 @@ TAB_CONFIG = {
         "title": "Faulty / Repairs", "table": "devices", "entity": "device",
         "columns": _columns(DEVICE_FIELDS, [("total_cost", "Total Cost", "money"),
                                             ("est_profit", "Est. Profit", "money"),
+                                            ("joblot_name", "Job Lot", "text"),
+                                            ("lot_pl", "Lot P/L", "money"),
                                             ("age_days", "Days In Stock", "days"),
                                             ("days_listed", "Days Listed", "days"),
                                             ("photo_count", "Photos", "int"),
@@ -65,6 +69,8 @@ TAB_CONFIG = {
     "parts": {
         "title": "Parts", "table": "parts", "entity": "part",
         "columns": _columns(PART_FIELDS, [("stock_value", "Stock Value", "money"),
+                                          ("joblot_name", "Job Lot", "text"),
+                                          ("lot_pl", "Lot P/L", "money"),
                                           ("photo_count", "Photos", "int"),
                                           ("note_count", "Notes", "notes")]),
         "hidden": {"part_number", "min_qty", "source", "purchase_date", "ebay_item_id",
@@ -182,7 +188,8 @@ class RowsModel(QAbstractTableModel):
             c = theme.current
             if row.get("excluded") or row.get("written_off"):
                 return QColor(c["muted"])
-            if key in ("profit", "est_profit", "running_profit", "margin") and v not in (None, ""):
+            if key in ("profit", "est_profit", "running_profit", "margin", "lot_pl") \
+                    and v not in (None, ""):
                 return QColor(c["good"] if num(v) >= 0 else c["bad"])
             if key == "faults" and v:
                 return QColor(c["warn"])
@@ -251,37 +258,57 @@ class InventoryTab(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
 
-        # ---- filter bar
+        # ---- filter bar (one row; on small screens search on top, filters in a grid)
+        small = theme.compact()
         bar = QHBoxLayout()
         self.search = QLineEdit(placeholderText=f"Search {self.cfg['title'].lower()}... "
                                                 "(any words: brand, model, IMEI, fault, note)")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.apply_filters)
         bar.addWidget(self.search, 3)
+        filters = []
         self.combos = {}
         if kind == "sales":
             self.period = QComboBox()
             self.period.addItems(PERIODS)
             self.period.currentIndexChanged.connect(self.apply_filters)
-            bar.addWidget(self.period)
+            filters.append(self.period)
         for key, label in self.cfg["filters"]:
             cb = QComboBox()
-            cb.setMinimumWidth(110)
+            cb.setMinimumWidth(60 if small else 110)
             cb.setMaxVisibleItems(25)
+            cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(8)
             cb.setProperty("all_label", f"All {label}")
             cb.addItem(f"All {label}")
             cb.currentIndexChanged.connect(self.apply_filters)
             self.combos[key] = cb
-            bar.addWidget(cb, 1)
+            filters.append(cb)
         self.low_only = None
         if kind == "parts":
             self.low_only = QCheckBox("Low stock only")
             self.low_only.toggled.connect(self.apply_filters)
-            bar.addWidget(self.low_only)
         clear = QPushButton("Clear")
         clear.clicked.connect(self.clear_filters)
-        bar.addWidget(clear)
-        lay.addLayout(bar)
+        if small:
+            if self.low_only:
+                bar.addWidget(self.low_only)
+            bar.addWidget(clear)
+            lay.addLayout(bar)
+            grid = QGridLayout()
+            grid.setSpacing(6)
+            for n, w in enumerate(filters):
+                grid.addWidget(w, n // 4, n % 4)
+            for c in range(4):
+                grid.setColumnStretch(c, 1)
+            lay.addLayout(grid)
+        else:
+            for w in filters:
+                bar.addWidget(w, 1)
+            if self.low_only:
+                bar.addWidget(self.low_only)
+            bar.addWidget(clear)
+            lay.addLayout(bar)
 
         # ---- table
         self.model = RowsModel(self.cfg["columns"], self)
@@ -295,7 +322,7 @@ class InventoryTab(QWidget):
         self.view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.view.verticalHeader().hide()
-        self.view.verticalHeader().setDefaultSectionSize(28)
+        self.view.verticalHeader().setDefaultSectionSize(40 if theme.touch() else 28)
         self.view.setWordWrap(False)
         self.view.doubleClicked.connect(lambda *_: self.edit())
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -661,6 +688,16 @@ class InventoryTab(QWidget):
         if path:
             self.status_message.emit(f"Test report saved to {path}")
 
+    def add_to_joblot(self):
+        rows = self.selected()
+        if not rows or self.kind == "sales":
+            return
+        from .joblots import AddToJobLotDialog
+        items = [(self.table_name, r["id"], r.get("sku") or self.title_of(r)) for r in rows]
+        dlg = AddToJobLotDialog(self.db, items, self)
+        if dlg.exec():
+            self._done(f"Added {len(rows)} item(s) to the job lot. See the Job Lots tab.")
+
     def write_off(self):
         rows = [r for r in self.selected() if r.get("status") != WRITTEN_OFF]
         if not rows or self.kind == "sales":
@@ -819,6 +856,7 @@ class InventoryTab(QWidget):
                 menu.addAction("Use Part From Stock...", self.use_part)
                 menu.addAction("Move to Faulty / Repairs" if self.kind == "working"
                                else "Move to Working Phones (repaired)", self.move)
+            menu.addAction("Add to Job Lot...", self.add_to_joblot)
             menu.addAction("Write Off...", self.write_off)
             status_menu = menu.addMenu("Set Status")
             for s in (DEVICE_STATUSES if self.table_name == "devices" else PART_STATUSES):

@@ -86,6 +86,23 @@ On macOS or Linux, run `./build_mac_linux.sh`, or run from source with `pip inst
 
 **Past sales / profit adjustments:** on the Sold tab press **Add**, or use **Add Past Sales / Profit Adjustment...** on the Dashboard. Enter earlier sales as one total: how many phones, the revenue and the profit (negative for a loss). Give it a date to put it in that month, or leave it undated so it only counts towards all-time. It's included in every total and the running profit, it syncs, and you can edit or delete it like any sale.
 
+**Job lots:** select phones or parts, then press **Add to Job Lot** (Ctrl+J or right-click). Pick an existing lot, or create one with the total you paid.
+- **Splitting the price:** it's shared across everything in the lot, either evenly or weighted by list price. You can also choose to set each item's cost yourself.
+- **The Job Lots tab:** each lot shows what you paid, what's sold, its **profit/loss so far**, and the potential profit if the rest sell at their list price.
+- **Per item:** every phone and part shows its own profit/loss. Estimates for unsold items are marked.
+- **Stock tabs:** the stock tabs also show each item's **Job Lot** and **Lot P/L**.
+- **Changing the lot:** when the lot price or split changes, sales from the lot are re-costed automatically.
+
+**Repaired phones:** moving a phone from Faulty to Working changes its SKU from `FD-00012` to `WP-00012-R`. The **-R** shows it was repaired. Moving it back to Faulty makes it `FD-00012` again.
+
+**Tablets and small screens:** on Android, and on any screen smaller than 1300 × 800, the app uses a compact layout:
+- **Filters:** they stack under the search box.
+- **Wide screens:** these scroll rather than overflowing.
+- **Dialogs:** these always open within the screen.
+- **Touch:** on Android, buttons and rows are bigger for touch.
+
+It's sized to fit a Galaxy Tab S10 Lite in landscape or portrait.
+
 **Write-offs:** right-click an item and choose **Write Off...** (or set its status to *Written Off*).
 It stays on record with your reason as a note, greyed out, but is no longer counted in stock totals or
 stock value. The dashboard shows the total written off, and you can set it back to *In Stock* at any time.

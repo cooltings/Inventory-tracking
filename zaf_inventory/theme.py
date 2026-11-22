@@ -1,5 +1,10 @@
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
+import os
+
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtWidgets import QDialog
+
+from .paths import is_android
 
 ACCENT = "#3b82f6"
 
@@ -13,6 +18,55 @@ COLORS = {
 }
 
 current = dict(COLORS["dark"])
+
+
+_COMPACT = None
+
+
+TOUCH_QSS = """
+    QPushButton { padding: 9px 16px; min-height: 22px; }
+    QToolButton { padding: 9px 12px; }
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit { min-height: 30px; }
+    QTabBar::tab { padding: 11px 18px; }
+    QCheckBox::indicator, QRadioButton::indicator { width: 22px; height: 22px; }
+    QScrollBar:vertical { width: 16px; } QScrollBar:horizontal { height: 16px; }
+"""
+
+
+def compact() -> bool:
+    """Smaller screens (tablets, small laptops): stack the filter bars, wrap button rows.
+    ZAF_COMPACT=1 / 0 forces it on or off."""
+    global _COMPACT
+    if _COMPACT is None:
+        forced = os.environ.get("ZAF_COMPACT")
+        if forced in ("0", "1"):
+            _COMPACT = forced == "1"
+        else:
+            screen = QGuiApplication.primaryScreen()
+            g = screen.availableGeometry() if screen else None
+            _COMPACT = is_android() or bool(g and (g.width() < 1300 or g.height() < 800))
+    return _COMPACT
+
+
+def touch() -> bool:
+    """Bigger tap targets on Android (ZAF_TOUCH=1 forces it, for testing)."""
+    return is_android() or os.environ.get("ZAF_TOUCH") == "1"
+
+
+class FitToScreen(QObject):
+    """Keeps every dialog within the screen, whatever size it asks for."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Show and isinstance(obj, QDialog):
+            screen = obj.screen() or QGuiApplication.primaryScreen()
+            if screen is not None:
+                g = screen.availableGeometry()
+                w = min(obj.width(), int(g.width() * 0.97))
+                h = min(obj.height(), int(g.height() * 0.95))
+                if (w, h) != (obj.width(), obj.height()) or not g.contains(obj.frameGeometry()):
+                    obj.resize(w, h)
+                    obj.move(g.x() + (g.width() - w) // 2, g.y() + (g.height() - h) // 2)
+        return False
 
 
 def apply_theme(app, mode="dark"):
@@ -78,7 +132,7 @@ def apply_theme(app, mode="dark"):
         QLabel#h2 {{ font-size: 12pt; font-weight: 700; }}
         QStatusBar {{ background: {c['panel']}; border-top: 1px solid {c['border']}; }}
         QListWidget {{ border: 1px solid {c['border']}; border-radius: 6px; }}
-    """)
+    """ + (TOUCH_QSS if touch() else ""))
 
 
 def app_icon() -> QIcon:
