@@ -206,8 +206,10 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QMenu, QToolButton
             menu = QMenu(self)
             for top in mb.actions():
-                if top.menu():
-                    menu.addMenu(top.menu())
+                if top.menu():   # a separate submenu sharing the actions: no QMenu has two owners
+                    sub = QMenu(top.text(), menu)
+                    sub.addActions(top.menu().actions())
+                    menu.addMenu(sub)
             go = QMenu("Go to", menu)
             for i in range(self.tabs.count()):
                 go.addAction(self.tabs.tabText(i), lambda i=i: self.tabs.setCurrentIndex(i))
@@ -434,5 +436,6 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
         self.sync.shutdown()
+        QApplication.instance().removeEventFilter(self._fit)
         self.db.close()
         event.accept()
