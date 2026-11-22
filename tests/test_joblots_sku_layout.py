@@ -148,6 +148,7 @@ assert not db.get("devices", b)["joblot_uid"]
 # landscape at the largest display scaling leaves about 1056 x 660 for the app
 from zaf_inventory import dialogs, device_test, sync_ui  # noqa: E402
 from zaf_inventory.main_window import MainWindow  # noqa: E402
+from zaf_inventory.sell_lots import SellAsJobLotDialog  # noqa: E402
 win = MainWindow(db)
 m = win.minimumSizeHint()
 assert m.width() <= 700 and m.height() <= 640, f"main window needs {m.width()}x{m.height()}"
@@ -162,7 +163,8 @@ for name, make in {
         "backups": lambda: dialogs.BackupDialog(db),
         "sync": lambda: sync_ui.SyncDialog(db, win.sync),
         "past sales": lambda: dialogs.AdjustmentDialog(db),
-        "job lot": lambda: AddToJobLotDialog(db, [("devices", b, "b")])}.items():
+        "job lot": lambda: AddToJobLotDialog(db, [("devices", b, "b")]),
+        "sell lot": lambda: SellAsJobLotDialog(db, [("devices", b, "b")])}.items():
     h = make().minimumSizeHint()
     assert h.width() <= 1000 and h.height() <= 620, f"{name} dialog needs {h.width()}x{h.height()}"
 # everything is reachable without the menu bar (hidden on Android) via the Menu button
@@ -172,7 +174,7 @@ assert {"File", "Edit", "Item", "View", "Help", "Go to"} <= set(titles), titles
 go = next(a.menu() for a in menu.actions() if a.text() == "Go to")
 assert len(go.actions()) == win.tabs.count() == 9
 go.actions()[5].trigger()
-assert win.tabs.currentWidget() is win.joblots
+assert win.tabs.currentWidget() is win.lots
 file_menu = next(a.menu() for a in menu.actions() if a.text().replace("&", "") == "File")
 assert any("Backup" in a.text() for a in file_menu.actions())
 win.close()

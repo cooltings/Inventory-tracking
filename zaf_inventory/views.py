@@ -38,6 +38,7 @@ TAB_CONFIG = {
                                             ("est_profit", "Est. Profit", "money"),
                                             ("joblot_name", "Job Lot", "text"),
                                             ("lot_pl", "Lot P/L", "money"),
+                                            ("sell_lot_name", "Selling In Lot", "text"),
                                             ("age_days", "Days In Stock", "days"),
                                             ("days_listed", "Days Listed", "days"),
                                             ("photo_count", "Photos", "int"),
@@ -54,6 +55,7 @@ TAB_CONFIG = {
                                             ("est_profit", "Est. Profit", "money"),
                                             ("joblot_name", "Job Lot", "text"),
                                             ("lot_pl", "Lot P/L", "money"),
+                                            ("sell_lot_name", "Selling In Lot", "text"),
                                             ("age_days", "Days In Stock", "days"),
                                             ("days_listed", "Days Listed", "days"),
                                             ("photo_count", "Photos", "int"),
@@ -71,6 +73,7 @@ TAB_CONFIG = {
         "columns": _columns(PART_FIELDS, [("stock_value", "Stock Value", "money"),
                                           ("joblot_name", "Job Lot", "text"),
                                           ("lot_pl", "Lot P/L", "money"),
+                                            ("sell_lot_name", "Selling In Lot", "text"),
                                           ("photo_count", "Photos", "int"),
                                           ("note_count", "Notes", "notes")]),
         "hidden": {"part_number", "min_qty", "source", "purchase_date", "ebay_item_id",
@@ -248,6 +251,7 @@ class FilterProxy(QSortFilterProxyModel):
 class InventoryTab(QWidget):
     changed = Signal()  # data in this tab changed, others may need a refresh
     status_message = Signal(str)
+    sell_lot_created = Signal(int)
 
     def __init__(self, db, kind, parent=None):
         super().__init__(parent)
@@ -698,6 +702,23 @@ class InventoryTab(QWidget):
         if dlg.exec():
             self._done(f"Added {len(rows)} item(s) to the job lot. See the Job Lots tab.")
 
+    def sell_as_joblot(self):
+        rows = [r for r in self.selected() if r.get("status") not in ("Sold", WRITTEN_OFF)]
+        if not rows or self.kind == "sales":
+            self.status_message.emit("Select the phones or parts to sell together first.")
+            return
+        taken = [r for r in rows if r.get("sell_lot_name")]
+        if taken and QMessageBox.question(
+                self, "Sell as Job Lot", f"{len(taken)} of these are already in a lot to sell "
+                f"({taken[0]['sell_lot_name']}). Move them to this one?") != QMessageBox.Yes:
+            return
+        from .sell_lots import SellAsJobLotDialog
+        items = [(self.table_name, r["id"], r.get("sku") or self.title_of(r)) for r in rows]
+        dlg = SellAsJobLotDialog(self.db, items, self)
+        if dlg.exec():
+            self.sell_lot_created.emit(dlg.lot_id)
+            self._done(f"{len(rows)} item(s) in the lot to sell. See Job Lots > Lots to Sell.")
+
     def write_off(self):
         rows = [r for r in self.selected() if r.get("status") != WRITTEN_OFF]
         if not rows or self.kind == "sales":
@@ -856,7 +877,8 @@ class InventoryTab(QWidget):
                 menu.addAction("Use Part From Stock...", self.use_part)
                 menu.addAction("Move to Faulty / Repairs" if self.kind == "working"
                                else "Move to Working Phones (repaired)", self.move)
-            menu.addAction("Add to Job Lot...", self.add_to_joblot)
+            menu.addAction("Add to Job Lot (bought)...", self.add_to_joblot)
+            menu.addAction("Sell as Job Lot...", self.sell_as_joblot)
             menu.addAction("Write Off...", self.write_off)
             status_menu = menu.addMenu("Set Status")
             for s in (DEVICE_STATUSES if self.table_name == "devices" else PART_STATUSES):

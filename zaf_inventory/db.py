@@ -43,15 +43,18 @@ SKU_PREFIX = {"working": "WP", "faulty": "FD", "parts": "PT"}
 # every device) and a "sync_ts" (UTC time of the last change), both maintained by
 # triggers so every write path is covered; deletes are recorded in sync_deleted.
 SYNC_TABLES = ("devices", "parts", "sales", "notes", "photos", "sheets", "sheet_rows",
-               "device_tests", "device_test_meta", "settings", "activity", "joblots")
+               "device_tests", "device_test_meta", "settings", "activity", "joblots",
+               "sell_lots")
 SYNC_NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 LEGACY_TS = "2000-01-01T00:00:00.000"
 
 _EXTRA_COLUMNS = {
     "devices": [("category", "TEXT NOT NULL DEFAULT 'working'"), ("sold_at", "TEXT"),
-                ("joblot_uid", "TEXT"), ("joblot_units", "INTEGER")],
-    "parts": [("joblot_uid", "TEXT"), ("joblot_units", "INTEGER")],
-    "sales": [("item_kind", "TEXT"), ("item_id", "INTEGER")],
+                ("joblot_uid", "TEXT"), ("joblot_units", "INTEGER"),
+                ("sell_lot_uid", "TEXT"), ("sell_lot_qty", "INTEGER")],
+    "parts": [("joblot_uid", "TEXT"), ("joblot_units", "INTEGER"),
+              ("sell_lot_uid", "TEXT"), ("sell_lot_qty", "INTEGER")],
+    "sales": [("item_kind", "TEXT"), ("item_id", "INTEGER"), ("sell_lot_uid", "TEXT")],
 }
 _FIELDS = {"devices": DEVICE_FIELDS, "parts": PART_FIELDS, "sales": SALE_FIELDS}
 
@@ -176,6 +179,13 @@ class Database:
             CREATE TABLE IF NOT EXISTS joblots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, purchase_date TEXT,
                 source TEXT, total_cost REAL DEFAULT 0, split TEXT DEFAULT 'even', notes TEXT,
+                created_at TEXT, updated_at TEXT);
+            CREATE TABLE IF NOT EXISTS sell_lots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+                status TEXT DEFAULT 'Draft', platform TEXT, list_price REAL DEFAULT 0,
+                postage_charged REAL DEFAULT 0, postage_cost REAL DEFAULT 0,
+                other_costs REAL DEFAULT 0, notes TEXT, listed_at TEXT,
+                sold_price REAL, sold_fees REAL, sold_date TEXT, sale_info TEXT,
                 created_at TEXT, updated_at TEXT);
             CREATE TABLE IF NOT EXISTS device_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -365,6 +375,7 @@ class Database:
                                  "t.category=? AND COALESCE(t.status,'') != 'Sold'", (category,))
         today = dt.date.today()
         lots = self.joblot_pl_map()
+        selling = self.sell_lot_names()
         tested = {}
         for t in self.conn.execute("SELECT device_id, test_key, result FROM device_tests"):
             tested.setdefault(t["device_id"], {})[t["test_key"]] = {"result": t["result"]}
@@ -381,12 +392,15 @@ class Database:
             r["days_listed"] = _age_days(r.get("listed_at"), today) if r.get("listed_at") else None
             lot = lots.get(("devices", r["id"]))
             r["joblot_name"], r["lot_pl"] = (lot[0], lot[1]) if lot else ("", None)
+            r["sell_lot_name"] = selling.get(r.get("sell_lot_uid"), "")
         return rows
 
     def list_parts(self):
         rows = self._with_counts("parts", "part")
         lots = self.joblot_pl_map()
+        selling = self.sell_lot_names()
         for r in rows:
+            r["sell_lot_name"] = selling.get(r.get("sell_lot_uid"), "")
             qty = int(num(r.get("quantity")))
             r["stock_value"] = round(qty * num(r.get("unit_cost")), 2)
             r["written_off"] = r.get("status") == WRITTEN_OFF
@@ -513,29 +527,32 @@ class Database:
     # ------------------------------------------------------------------ business actions
     def record_sale(self, kind, item_id, sale):
         """Create a sale and take the item out of stock, all in one transaction."""
+        with self.conn:
+            return self._record_sale_nocommit(kind, item_id, sale)
+
+    def _record_sale_nocommit(self, kind, item_id, sale):
         sale = dict(sale)
         sale["item_kind"] = kind
         sale["item_id"] = item_id
         sale["profit"] = calc_profit(sale)
-        with self.conn:
-            sale_id = self.insert("sales", sale, commit=False)
-            sold_qty = int(num(sale.get("quantity"), 1)) or 1
-            if kind == "device":
-                device = self.get("devices", item_id)
-                left = max(0, int(num(device.get("quantity"), 1)) - sold_qty)
-                changes = {"quantity": left}
-                if left == 0:
-                    # keep the original line quantity for the record, mark it sold
-                    changes = {"status": "Sold", "sold_at": now_iso(),
-                               "quantity": int(num(device.get("quantity"), 1)) or 1}
-                self.update("devices", item_id, changes, commit=False)
-            else:
-                part = self.get("parts", item_id)
-                left = max(0, int(num(part.get("quantity"))) - sold_qty)
-                self.update("parts", item_id, {"quantity": left}, commit=False)
-            self.log("Sold", kind, item_id,
-                     f"{sale.get('sku')} {sale.get('title')} for "
-                     f"{num(sale.get('sale_price')):.2f} (profit {sale['profit']:.2f})", commit=False)
+        sale_id = self.insert("sales", sale, commit=False)
+        sold_qty = int(num(sale.get("quantity"), 1)) or 1
+        if kind == "device":
+            device = self.get("devices", item_id)
+            left = max(0, int(num(device.get("quantity"), 1)) - sold_qty)
+            changes = {"quantity": left}
+            if left == 0:
+                # keep the original line quantity for the record, mark it sold
+                changes = {"status": "Sold", "sold_at": now_iso(),
+                           "quantity": int(num(device.get("quantity"), 1)) or 1}
+            self.update("devices", item_id, changes, commit=False)
+        else:
+            part = self.get("parts", item_id)
+            left = max(0, int(num(part.get("quantity"))) - sold_qty)
+            self.update("parts", item_id, {"quantity": left}, commit=False)
+        self.log("Sold", kind, item_id,
+                 f"{sale.get('sku')} {sale.get('title')} for "
+                 f"{num(sale.get('sale_price')):.2f} (profit {sale['profit']:.2f})", commit=False)
         return sale_id
 
     def save_adjustment(self, data, sale_id=None):
@@ -787,6 +804,234 @@ class Database:
             for i in rep["items"]:
                 out[(i["table"], i["id"])] = (lot["name"], i["pl"], i["estimated"])
         return out
+
+    # ------------------------------------------------------------------ job lots to sell
+    # Your own job lots: stock picked out to sell together as one listing.
+    SELL_LOT_FIELDS = ("name", "status", "platform", "list_price", "postage_charged",
+                       "postage_cost", "other_costs", "notes")
+
+    def sell_lots(self, include_sold=True):
+        where = "" if include_sold else "WHERE COALESCE(status,'') != 'Sold'"
+        return [dict(r) for r in self.conn.execute(
+            f"SELECT * FROM sell_lots {where} ORDER BY (status='Sold'), id DESC")]
+
+    def sell_lot(self, lot_id):
+        row = self.conn.execute("SELECT * FROM sell_lots WHERE id=?", (lot_id,)).fetchone()
+        return dict(row) if row else None
+
+    def sell_lot_names(self):
+        return {r["uid"]: r["name"] for r in self.conn.execute(
+            "SELECT uid, name FROM sell_lots WHERE COALESCE(status,'') != 'Sold'")}
+
+    def save_sell_lot(self, data, lot_id=None):
+        data = {k: data[k] for k in self.SELL_LOT_FIELDS if k in data}
+        if lot_id:
+            old = self.sell_lot(lot_id)
+            if data.get("status") == "Listed" and old.get("status") != "Listed":
+                data["listed_at"] = old.get("listed_at") or now_iso()
+            with self.conn:
+                self.update("sell_lots", lot_id, data, commit=False)
+                if data.get("status") == "Listed" and old.get("status") != "Listed":
+                    self._set_lot_items_status(old["uid"], "Listed")
+        else:
+            data.setdefault("status", "Draft")
+            if data["status"] == "Listed":
+                data["listed_at"] = now_iso()
+            lot_id = self.insert("sell_lots", data)
+            self.log("Selling lot", "sell_lot", lot_id, f"Created {data.get('name')}")
+        return lot_id
+
+    def _set_lot_items_status(self, lot_uid, status):
+        for r in self._sell_lot_rows(lot_uid):
+            if r.get("status") in ("In Stock", "Awaiting Repair", "Reserved", None, ""):
+                self.update(r["table"], r["id"], {"status": status}, commit=False)
+
+    def delete_sell_lot(self, lot_id):
+        lot = self.sell_lot(lot_id)
+        if not lot:
+            return
+        with self.conn:
+            for t in ("devices", "parts"):
+                for r in self.conn.execute(f"SELECT id FROM {t} WHERE sell_lot_uid=? AND "
+                                           "COALESCE(status,'') != 'Sold'", (lot["uid"],)).fetchall():
+                    item = self.get(t, r["id"])
+                    data = {"sell_lot_uid": None, "sell_lot_qty": None}
+                    if item.get("status") == "Listed":
+                        data["status"] = ("Awaiting Repair" if item.get("category") == "faulty"
+                                          else "In Stock")
+                    self.update(t, r["id"], data, commit=False)
+            self.conn.execute("DELETE FROM sell_lots WHERE id=?", (lot_id,))
+            self.log("Selling lot", "sell_lot", lot_id, f"Deleted {lot['name']} (items kept)",
+                     commit=False)
+
+    def add_to_sell_lot(self, lot_id, items):
+        """items: [(table, id)] or [(table, id, qty)]; a part can go in with part of its stock."""
+        lot = self.sell_lot(lot_id)
+        with self.conn:
+            for it in items:
+                table, item_id = it[0], it[1]
+                item = self.get(table, item_id)
+                stock = max(1, int(num(item.get("quantity"), 1)))
+                qty = stock if len(it) < 3 or not it[2] else max(1, min(stock, int(it[2])))
+                self.update(table, item_id, {"sell_lot_uid": lot["uid"], "sell_lot_qty": qty},
+                            commit=False)
+                self.add_note("device" if table == "devices" else "part", item_id,
+                              f"Added to selling job lot: {lot['name']}", commit=False)
+            if lot.get("status") == "Listed":
+                self._set_lot_items_status(lot["uid"], "Listed")
+            self.log("Selling lot", "sell_lot", lot_id,
+                     f"Added {len(items)} item(s) to {lot['name']}", commit=False)
+
+    def remove_from_sell_lot(self, table, item_id):
+        item = self.get(table, item_id)
+        data = {"sell_lot_uid": None, "sell_lot_qty": None}
+        if item.get("status") == "Listed":   # it was listed as part of the lot
+            data["status"] = "Awaiting Repair" if item.get("category") == "faulty" else "In Stock"
+        self.update(table, item_id, data)
+
+    def _sell_lot_rows(self, lot_uid):
+        rows = []
+        for table in ("devices", "parts"):
+            for r in self.conn.execute(f"SELECT * FROM {table} WHERE sell_lot_uid=? ORDER BY id",
+                                       (lot_uid,)):
+                rows.append({"table": table, **dict(r)})
+        return rows
+
+    def sell_lot_report(self, lot_id, price=None, postage_charged=None, postage_cost=None,
+                        other_costs=None, fees=None):
+        """Costs, fees and estimated profit for the lot and each item in it.
+
+        The lot price (and fees / postage) is shared over the items by their own list
+        price (unpriced ones count as the average), else by their cost, else evenly."""
+        lot = self.sell_lot(lot_id)
+        sold = lot.get("status") == "Sold"
+        if sold:
+            return self._sold_lot_report(lot)
+        fee_pct, fee_fixed = num(self.setting("fee_percent")), num(self.setting("fee_fixed"))
+        price = num(lot.get("list_price")) if price is None else num(price)
+        pp = num(lot.get("postage_charged")) if postage_charged is None else num(postage_charged)
+        post = num(lot.get("postage_cost")) if postage_cost is None else num(postage_cost)
+        other = num(lot.get("other_costs")) if other_costs is None else num(other_costs)
+        gross = price + pp
+        if fees is None:
+            fees = gross * fee_pct / 100 + (fee_fixed if gross > 0 else 0.0)
+        items, total_cost = [], 0.0
+        for r in self._sell_lot_rows(lot["uid"]):
+            dev = r["table"] == "devices"
+            qty = max(1, int(num(r.get("sell_lot_qty"), 1)))
+            unit = (num(r.get("purchase_price")) + num(r.get("repair_cost"))) if dev \
+                else num(r.get("unit_cost"))
+            cost = round(unit * qty, 2)
+            total_cost += cost
+            items.append({"table": r["table"], "id": r["id"], "sku": r.get("sku"),
+                          "title": device_title(r) if dev else part_title(r),
+                          "where": ("Working" if r.get("category") == "working" else "Faulty")
+                          if dev else "Parts", "qty": qty, "cost": cost,
+                          "list_price": num(r.get("list_price")) * qty, "status": r.get("status")})
+        self._share(items, price, pp, post, other, fees)
+        indiv = None
+        if items and all(i["list_price"] > 0 for i in items):
+            indiv = round(sum(i["list_price"] - i["list_price"] * fee_pct / 100 - fee_fixed
+                              - i["cost"] for i in items), 2)
+        pct = fee_pct / 100
+        costs = total_cost + post + other
+        break_even = (costs + fee_fixed) / (1 - pct) - pp if pct < 1 else None
+        profit = round(gross - fees - costs, 2)
+        return {"lot": lot, "items": items, "sold": False, "totals": {
+            "price": price, "postage_charged": pp, "postage_cost": post, "other_costs": other,
+            "gross": gross, "fees": round(fees, 2), "cost": round(total_cost, 2),
+            "profit": profit, "margin": profit / gross * 100 if gross else None,
+            "break_even": round(break_even, 2) if break_even is not None else None,
+            "individual": indiv, "count": len(items),
+            "units": sum(i["qty"] for i in items)}}
+
+    @staticmethod
+    def _share(items, price, pp, post, other, fees):
+        """Give each item its part of the lot money; the last item takes the rounding."""
+        if not items:
+            return
+        known = [i["list_price"] for i in items if i["list_price"] > 0]
+        if known:
+            fill = sum(known) / len(known)
+            weights = [i["list_price"] if i["list_price"] > 0 else fill for i in items]
+        elif sum(i["cost"] for i in items) > 0:
+            weights = [i["cost"] for i in items]
+        else:
+            weights = [i["qty"] for i in items]
+        denom = sum(weights) or 1.0
+        for key, total in (("price", price), ("postage_charged", pp), ("postage_cost", post),
+                           ("other_costs", other), ("fees", fees)):
+            left = round(total, 2)
+            for n, (i, w) in enumerate(zip(items, weights)):
+                share = left if n == len(items) - 1 else round(total * w / denom, 2)
+                i[key] = share
+                left = round(left - share, 2)
+        for i in items:
+            i["profit"] = round(i["price"] + i["postage_charged"] - i["fees"] - i["postage_cost"]
+                                - i["other_costs"] - i["cost"], 2)
+
+    def _sold_lot_report(self, lot):
+        items = []
+        for s in self.conn.execute("SELECT * FROM sales WHERE sell_lot_uid=? ORDER BY id",
+                                   (lot["uid"],)):
+            s = dict(s)
+            items.append({"table": "devices" if s["item_kind"] == "device" else "parts",
+                          "id": s["item_id"], "sale_id": s["id"], "sku": s.get("sku"),
+                          "title": s.get("title"), "where": "Sold",
+                          "qty": int(num(s.get("quantity"), 1)), "cost": num(s.get("cost_basis")),
+                          "list_price": 0.0, "price": num(s.get("sale_price")),
+                          "postage_charged": num(s.get("postage_charged")),
+                          "postage_cost": num(s.get("postage_cost")),
+                          "other_costs": num(s.get("other_costs")), "fees": num(s.get("fees")),
+                          "profit": num(s.get("profit")), "status": s.get("status")})
+        t = {k: round(sum(i[k] for i in items), 2) for k in
+             ("price", "postage_charged", "postage_cost", "other_costs", "fees", "cost", "profit")}
+        t["gross"] = round(t["price"] + t["postage_charged"], 2)
+        t.update({"margin": t["profit"] / t["gross"] * 100 if t["gross"] else None,
+                  "break_even": None, "individual": None, "count": len(items),
+                  "units": sum(i["qty"] for i in items)})
+        return {"lot": lot, "items": items, "sold": True, "totals": t}
+
+    def sell_lot_sold(self, lot_id, sale):
+        """Record the lot as sold: one sale per item, with the money shared out."""
+        rep = self.sell_lot_report(lot_id, price=sale.get("sale_price"),
+                                   postage_charged=sale.get("postage_charged"),
+                                   postage_cost=sale.get("postage_cost"),
+                                   other_costs=sale.get("other_costs"), fees=sale.get("fees"))
+        lot = rep["lot"]
+        if rep["sold"] or not rep["items"]:
+            return []
+        ids = []
+        with self.conn:
+            for i in rep["items"]:
+                kind = "device" if i["table"] == "devices" else "part"
+                row = {"sku": i["sku"], "title": f"{i['title']} [job lot: {lot['name']}]",
+                       "sale_date": sale.get("sale_date") or today_iso(),
+                       "platform": sale.get("platform") or lot.get("platform"),
+                       "order_number": sale.get("order_number"), "buyer": sale.get("buyer"),
+                       "status": sale.get("status") or "Completed", "quantity": i["qty"],
+                       "sale_price": i["price"], "postage_charged": i["postage_charged"],
+                       "postage_cost": i["postage_cost"], "other_costs": i["other_costs"],
+                       "fees": i["fees"], "cost_basis": i["cost"], "sell_lot_uid": lot["uid"]}
+                if kind == "device":
+                    d = self.get("devices", i["id"])
+                    row.update({"brand": d.get("brand"), "model": d.get("model"),
+                                "imei": d.get("imei"), "serial": d.get("serial")})
+                row = {k: v for k, v in row.items() if k in self.columns("sales")}
+                ids.append(self._record_sale_nocommit(kind, i["id"], row))
+                if kind == "part":   # any stock left over is no longer in the lot
+                    self.update("parts", i["id"], {"sell_lot_uid": None, "sell_lot_qty": None},
+                                commit=False)
+            self.update("sell_lots", lot_id, {
+                "status": "Sold", "sold_price": round(num(sale.get("sale_price")), 2),
+                "sold_fees": rep["totals"]["fees"], "sold_date": sale.get("sale_date") or today_iso(),
+                "sale_info": json.dumps({k: sale.get(k) for k in ("platform", "order_number", "buyer")})},
+                commit=False)
+            self.log("Selling lot", "sell_lot", lot_id,
+                     f"Sold {lot['name']} ({len(ids)} items) for "
+                     f"{num(sale.get('sale_price')):.2f} (profit {rep['totals']['profit']:.2f})",
+                     commit=False)
+        return ids
 
     # ------------------------------------------------------------------ sheets (ledgers)
     SHEET_COLUMNS = ("row_date", "description", "category", "reference",

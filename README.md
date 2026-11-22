@@ -86,7 +86,13 @@ On macOS or Linux, run `./build_mac_linux.sh`, or run from source with `pip inst
 
 **Past sales / profit adjustments:** on the Sold tab press **Add**, or use **Add Past Sales / Profit Adjustment...** on the Dashboard. Enter earlier sales as one total: how many phones, the revenue and the profit (negative for a loss). Give it a date to put it in that month, or leave it undated so it only counts towards all-time. It's included in every total and the running profit, it syncs, and you can edit or delete it like any sale.
 
-**Job lots:** select phones or parts, then press **Add to Job Lot** (Ctrl+J or right-click). Pick an existing lot, or create one with the total you paid.
+**Selling your own job lots:** select phones (e.g. broken ones) or parts, then press **Sell as Job Lot** (Ctrl+Shift+J or right-click). Enter the lot's list price, P&P and postage cost.
+- **Estimate:** the app adds up what the items cost you (purchase + repairs), works out the fees from your fee settings and shows the **estimated profit**, margin and break-even price. When every item has a list price, it also compares the lot with selling them one by one.
+- **Each item's share:** the lot price, fees and postage are shared across the items by their own list price (else by cost), so every phone shows its own estimated profit.
+- **Where to find it:** lots are under **Job Lots > Lots to Sell**; the stock tabs show **Selling In Lot**. Setting the lot to Listed marks its items Listed.
+- **When it sells:** press **Mark Lot Sold**. Enter the final price (fees fill in, and you can type over them). Each item gets its own sale in Sold, so your totals and profit stay right.
+
+**Job lots you bought:** select phones or parts, then press **Add to Job Lot** (Ctrl+J or right-click). Pick an existing lot, or create one with the total you paid.
 - **Splitting the price:** it's shared across everything in the lot, either evenly or weighted by list price. You can also choose to set each item's cost yourself.
 - **The Job Lots tab:** each lot shows what you paid, what's sold, its **profit/loss so far**, and the potential profit if the rest sell at their list price.
 - **Per item:** every phone and part shows its own profit/loss. Estimates for unsold items are marked.

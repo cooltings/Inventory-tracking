@@ -76,7 +76,7 @@ jobs:
           ZAF_TEST_OUT: ${{ runner.temp }}/test-out
         run: |
           for t in test_backup_restore test_written_off test_device_tests test_sync test_files \
-                   test_listing_and_adjustments test_joblots_sku_layout; do
+                   test_listing_and_adjustments test_joblots_sku_layout test_sell_lots; do
             python "tests/$t.py"
             code=$?
             if [ $code -ne 0 ]; then echo "::error::$t exited with code $code"; exit 1; fi

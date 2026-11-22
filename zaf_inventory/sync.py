@@ -57,7 +57,8 @@ NATURAL_KEYS = {"device_tests": ("device_id", "test_key"),
 SYNCED_SETTINGS = {"currency", "fee_percent", "fee_fixed", "default_platform", "aged_days",
                    "report_business"}
 # apply parents before children so references can be resolved
-ORDER = ("joblots", "devices", "parts", "sheets", "sales", "notes", "photos", "sheet_rows",
+ORDER = ("joblots", "sell_lots", "devices", "parts", "sheets", "sales", "notes", "photos",
+         "sheet_rows",
          "device_tests", "device_test_meta", "settings", "activity")
 
 
