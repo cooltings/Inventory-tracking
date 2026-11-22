@@ -186,6 +186,7 @@ class Database:
                 postage_charged REAL DEFAULT 0, postage_cost REAL DEFAULT 0,
                 other_costs REAL DEFAULT 0, notes TEXT, listed_at TEXT,
                 sold_price REAL, sold_fees REAL, sold_date TEXT, sale_info TEXT,
+                fee_percent REAL, fee_fixed REAL, promo_percent REAL,
                 created_at TEXT, updated_at TEXT);
             CREATE TABLE IF NOT EXISTS device_tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,6 +208,10 @@ class Database:
             CREATE INDEX IF NOT EXISTS ix_devices_imei ON devices(imei);
             CREATE INDEX IF NOT EXISTS ix_sales_date ON sales(sale_date);
         """)
+        have = {r["name"] for r in c.execute("PRAGMA table_info(sell_lots)")}
+        for col in ("fee_percent", "fee_fixed", "promo_percent"):   # added in 1.5.1
+            if col not in have:
+                c.execute(f"ALTER TABLE sell_lots ADD COLUMN {col} REAL")
         self._sync_schema()
         self._listing_schema()
         self._repaired_sku_migration()
@@ -808,7 +813,8 @@ class Database:
     # ------------------------------------------------------------------ job lots to sell
     # Your own job lots: stock picked out to sell together as one listing.
     SELL_LOT_FIELDS = ("name", "status", "platform", "list_price", "postage_charged",
-                       "postage_cost", "other_costs", "notes")
+                       "postage_cost", "other_costs", "notes", "fee_percent", "fee_fixed",
+                       "promo_percent")
 
     def sell_lots(self, include_sold=True):
         where = "" if include_sold else "WHERE COALESCE(status,'') != 'Sold'"
@@ -897,8 +903,16 @@ class Database:
                 rows.append({"table": table, **dict(r)})
         return rows
 
+    def sell_lot_fees(self, lot):
+        """(fee %, fixed fee, promoted %) for a lot: its own rates, else your settings."""
+        def pick(key, default):
+            v = lot.get(key) if lot else None
+            return num(default) if v is None or v == "" else num(v)
+        return (pick("fee_percent", self.setting("fee_percent")),
+                pick("fee_fixed", self.setting("fee_fixed")), pick("promo_percent", 0))
+
     def sell_lot_report(self, lot_id, price=None, postage_charged=None, postage_cost=None,
-                        other_costs=None, fees=None):
+                        other_costs=None, fees=None, rates=None):
         """Costs, fees and estimated profit for the lot and each item in it.
 
         The lot price (and fees / postage) is shared over the items by their own list
@@ -907,14 +921,14 @@ class Database:
         sold = lot.get("status") == "Sold"
         if sold:
             return self._sold_lot_report(lot)
-        fee_pct, fee_fixed = num(self.setting("fee_percent")), num(self.setting("fee_fixed"))
+        fee_pct, fee_fixed, promo = rates or self.sell_lot_fees(lot)
         price = num(lot.get("list_price")) if price is None else num(price)
         pp = num(lot.get("postage_charged")) if postage_charged is None else num(postage_charged)
         post = num(lot.get("postage_cost")) if postage_cost is None else num(postage_cost)
         other = num(lot.get("other_costs")) if other_costs is None else num(other_costs)
         gross = price + pp
         if fees is None:
-            fees = gross * fee_pct / 100 + (fee_fixed if gross > 0 else 0.0)
+            fees = gross * (fee_pct + promo) / 100 + (fee_fixed if gross > 0 else 0.0)
         items, total_cost = [], 0.0
         for r in self._sell_lot_rows(lot["uid"]):
             dev = r["table"] == "devices"
@@ -931,9 +945,9 @@ class Database:
         self._share(items, price, pp, post, other, fees)
         indiv = None
         if items and all(i["list_price"] > 0 for i in items):
-            indiv = round(sum(i["list_price"] - i["list_price"] * fee_pct / 100 - fee_fixed
+            indiv = round(sum(i["list_price"] - i["list_price"] * (fee_pct + promo) / 100 - fee_fixed
                               - i["cost"] for i in items), 2)
-        pct = fee_pct / 100
+        pct = (fee_pct + promo) / 100
         costs = total_cost + post + other
         break_even = (costs + fee_fixed) / (1 - pct) - pp if pct < 1 else None
         profit = round(gross - fees - costs, 2)
@@ -943,6 +957,7 @@ class Database:
             "profit": profit, "margin": profit / gross * 100 if gross else None,
             "break_even": round(break_even, 2) if break_even is not None else None,
             "individual": indiv, "count": len(items),
+            "fee_percent": fee_pct, "fee_fixed": fee_fixed, "promo_percent": promo,
             "units": sum(i["qty"] for i in items)}}
 
     @staticmethod

@@ -122,6 +122,31 @@ assert t2["individual"] == round(2 * (30 - 3 - 0.30 - 10), 2), t2
 db.delete_sell_lot(lot2)
 assert db.get("devices", d1)["model"] == "1" and not db.get("devices", d1)["sell_lot_uid"]
 
+# ------------------------------------------------------------------ fee rates per lot
+lot3 = db.save_sell_lot({"name": "fees", "list_price": 100})
+d3 = db.insert("devices", {"category": "faulty", "brand": "C", "model": "3", "quantity": 1,
+                           "purchase_price": 20})
+db.add_to_sell_lot(lot3, [("devices", d3)])
+assert db.sell_lot_report(lot3)["totals"]["fees"] == 10.3, "starts from Settings (10% + 0.30)"
+tab.select_lot(lot3)
+assert tab.form.fee_pct.value() == 10 and abs(tab.form.fee_fixed.value() - 0.3) < 1e-9
+tab.form.fee_pct.setValue(12.8)
+tab.form.promo.setValue(2)
+assert "12.8% + 2% promo" in tab.summary.text(), tab.summary.text()
+tab.save_lot()
+t3 = db.sell_lot_report(lot3)["totals"]
+assert t3["fees"] == round(100 * 0.148 + 0.30, 2) and t3["profit"] == round(100 - 15.1 - 20, 2), t3
+db.set_setting("fee_percent", "5")          # changing Settings later leaves the lot's rates
+assert db.sell_lot_report(lot3)["totals"]["fees"] == 15.1
+sold3 = MarkLotSoldDialog(db, lot3)
+assert abs(sold3.fees.value() - 15.1) < 0.001, "Mark Sold uses the lot's rates"
+db.set_setting("fee_percent", "10")
+db.delete_sell_lot(lot3)
+
+# a lot saved by 1.5.0 (no rates stored) still uses Settings
+db.conn.execute("UPDATE sell_lots SET fee_percent=NULL, fee_fixed=NULL, promo_percent=NULL")
+assert db.sell_lot_fees(db.sell_lot(lot)) == (10.0, 0.3, 0.0)
+
 # ------------------------------------------------------------------ the window
 from zaf_inventory.main_window import MainWindow  # noqa: E402
 win = MainWindow(db)

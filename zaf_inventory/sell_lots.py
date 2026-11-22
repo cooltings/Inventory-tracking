@@ -2,7 +2,7 @@
 from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDateEdit, QDialog,
-                               QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView,
+                               QDialogButtonBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QHeaderView,
                                QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QPushButton, QSplitter, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
@@ -15,10 +15,26 @@ LOT_STATUSES = ("Draft", "Listed")
 NEW_LOT = "__new__"
 
 
+def _pct_box():
+    w = QDoubleSpinBox()
+    w.setRange(0, 100)
+    w.setDecimals(2)
+    w.setSuffix("%")
+    w.setAlignment(Qt.AlignRight)
+    return w
+
+
 def _pl(value):
     c = theme.current
     word = "Profit" if value >= 0 else "Loss"
     return f"<span style='color:{c['good' if value >= 0 else 'bad']}'><b>{word} {money(value)}</b></span>"
+
+
+def _rates_text(t):
+    if t.get("fee_percent") is None:
+        return ""
+    promo = " + %g%% promo" % t["promo_percent"] if t.get("promo_percent") else ""
+    return " (%g%%%s + %s)" % (t["fee_percent"], promo, money(t["fee_fixed"]))
 
 
 def summary_html(t, sold=False):
@@ -30,6 +46,7 @@ def summary_html(t, sold=False):
              f"{head} <b>{money(t['price'])}</b>"
              + (f" + {money(t['postage_charged'])} P&amp;P" if t["postage_charged"] else "")
              + f" · fees {money(t['fees'])}"
+             + _rates_text(t)
              + (f" · postage {money(t['postage_cost'])}" if t["postage_cost"] else "")
              + (f" · other {money(t['other_costs'])}" if t["other_costs"] else ""),
              ("Profit: " if sold else "Estimated: ") + _pl(t["profit"])
@@ -60,14 +77,27 @@ class SellLotForm(QWidget):
         self.pp = _money_box()
         self.post = _money_box()
         self.other = _money_box()
+        self.fee_pct = _pct_box()
+        self.fee_fixed = _money_box()
+        self.promo = _pct_box()
+        self.fee_pct.setToolTip("Final value fee for this lot (starts from your Settings)")
+        self.promo.setToolTip("Promoted listing fee, if you promote the lot")
         f.addRow("Lot name", self.name)
         f.addRow("List price", self.price)
         f.addRow("P&&P charged", self.pp)
         f.addRow("Postage cost", self.post)
         f.addRow("Other costs", self.other)
+        fees = QHBoxLayout()
+        fees.setContentsMargins(0, 0, 0, 0)
+        for lbl, w in (("", self.fee_pct), ("+", self.fee_fixed), ("Promo", self.promo)):
+            if lbl:
+                fees.addWidget(QLabel(lbl))
+            fees.addWidget(w, 1)
+        f.addRow("Fees", fees)
         f.addRow("Status", self.status)
         f.addRow("Platform", self.platform)
-        for w in (self.price, self.pp, self.post, self.other):
+        for w in (self.price, self.pp, self.post, self.other, self.fee_pct, self.fee_fixed,
+                  self.promo):
             w.valueChanged.connect(self.changed)
 
     def set_lot(self, lot):
@@ -81,7 +111,14 @@ class SellLotForm(QWidget):
         self.pp.setValue(float(lot.get("postage_charged") or 0))
         self.post.setValue(float(lot.get("postage_cost") or 0))
         self.other.setValue(float(lot.get("other_costs") or 0))
+        pct, fixed, promo = self.db.sell_lot_fees(lot)
+        self.fee_pct.setValue(pct)
+        self.fee_fixed.setValue(fixed)
+        self.promo.setValue(promo)
         self.blockSignals(False)
+
+    def rates(self):
+        return (self.fee_pct.value(), self.fee_fixed.value(), self.promo.value())
 
     def values(self):
         return {"name": self.name.text().strip() or "Job lot",
@@ -90,7 +127,10 @@ class SellLotForm(QWidget):
                 "list_price": round(self.price.value(), 2),
                 "postage_charged": round(self.pp.value(), 2),
                 "postage_cost": round(self.post.value(), 2),
-                "other_costs": round(self.other.value(), 2)}
+                "other_costs": round(self.other.value(), 2),
+                "fee_percent": round(self.fee_pct.value(), 2),
+                "fee_fixed": round(self.fee_fixed.value(), 2),
+                "promo_percent": round(self.promo.value(), 2)}
 
 
 class SellAsJobLotDialog(QDialog):
@@ -207,7 +247,7 @@ class MarkLotSoldDialog(QDialog):
         f.addRow("Order no.", self.order)
         f.addRow("Buyer", self.buyer)
         lay.addLayout(f)
-        hint = QLabel("Fees are worked out from your fee settings; type over them if eBay "
+        hint = QLabel("Fees are worked out from the lot's fee rates; type over them if eBay "
                       "charged something different. Each item gets its own sale in Sold, "
                       "with the money shared out.")
         hint.setObjectName("muted")
@@ -234,11 +274,10 @@ class MarkLotSoldDialog(QDialog):
 
     def _update(self, *_, fees_only=False):
         if self.auto_fees and not fees_only:
-            pct = float(self.db.setting("fee_percent") or 0)
-            fixed = float(self.db.setting("fee_fixed") or 0)
+            pct, fixed, promo = self.db.sell_lot_fees(self.db.sell_lot(self.lot_id))
             gross = self.price.value() + self.pp.value()
             self._setting_fees = True
-            self.fees.setValue(gross * pct / 100 + (fixed if gross > 0 else 0))
+            self.fees.setValue(gross * (pct + promo) / 100 + (fixed if gross > 0 else 0))
             self._setting_fees = False
         rep = self.db.sell_lot_report(self.lot_id, **self._money())
         self.preview.setText(summary_html(rep["totals"]).replace("Estimated", "Profit"))
@@ -403,7 +442,8 @@ class SellLotsTab(QWidget):
         self._fill(self.db.sell_lot_report(self.lot_id, price=v["list_price"],
                                            postage_charged=v["postage_charged"],
                                            postage_cost=v["postage_cost"],
-                                           other_costs=v["other_costs"]))
+                                           other_costs=v["other_costs"],
+                                           rates=self.form.rates()))
 
     def _fill(self, rep):
         self.summary.setText(summary_html(rep["totals"], rep["sold"]))
