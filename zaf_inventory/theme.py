@@ -30,6 +30,9 @@ TOUCH_QSS = """
     QTabBar::tab { padding: 11px 18px; }
     QCheckBox::indicator, QRadioButton::indicator { width: 22px; height: 22px; }
     QScrollBar:vertical { width: 16px; } QScrollBar:horizontal { height: 16px; }
+    QTabBar::scroller { width: 48px; }
+    QTabBar QToolButton { min-height: 34px; border: 1px solid #3a404c; background: #262a33; }
+    QToolBarExtension { min-width: 36px; }
 """
 
 

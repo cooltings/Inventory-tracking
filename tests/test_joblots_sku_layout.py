@@ -165,5 +165,15 @@ for name, make in {
         "job lot": lambda: AddToJobLotDialog(db, [("devices", b, "b")])}.items():
     h = make().minimumSizeHint()
     assert h.width() <= 1000 and h.height() <= 620, f"{name} dialog needs {h.width()}x{h.height()}"
+# everything is reachable without the menu bar (hidden on Android) via the Menu button
+menu = win.menu_button.menu()
+titles = [a.text().replace("&", "") for a in menu.actions()]
+assert {"File", "Edit", "Item", "View", "Help", "Go to"} <= set(titles), titles
+go = next(a.menu() for a in menu.actions() if a.text() == "Go to")
+assert len(go.actions()) == win.tabs.count() == 9
+go.actions()[5].trigger()
+assert win.tabs.currentWidget() is win.joblots
+file_menu = next(a.menu() for a in menu.actions() if a.text().replace("&", "") == "File")
+assert any("Backup" in a.text() for a in file_menu.actions())
 win.close()
 print("job lots + SKU + tablet layout test passed")

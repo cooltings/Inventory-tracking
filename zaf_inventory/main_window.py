@@ -200,6 +200,29 @@ class MainWindow(QMainWindow):
             self, "Keyboard Shortcuts", SHORTCUTS))
         m.addAction("About", self.about)
 
+        # Android has no visible menu bar, and narrow screens cut the toolbar off: a Menu
+        # button at the start of the toolbar holds every menu plus a list of the tabs
+        if theme.compact() or is_android():
+            from PySide6.QtWidgets import QMenu, QToolButton
+            menu = QMenu(self)
+            for top in mb.actions():
+                if top.menu():
+                    menu.addMenu(top.menu())
+            go = QMenu("Go to", menu)
+            for i in range(self.tabs.count()):
+                go.addAction(self.tabs.tabText(i), lambda i=i: self.tabs.setCurrentIndex(i))
+            menu.addMenu(go)
+            self._menus = (menu, go)   # keep Python references so they aren't collected
+            button = QToolButton()
+            button.setText("☰ Menu")
+            button.setMenu(menu)
+            button.setPopupMode(QToolButton.InstantPopup)
+            button.setToolTip("All menus and tabs")
+            self.menu_button = button
+            tb.insertWidget(tb.actions()[0], button)
+            if is_android():
+                mb.hide()
+
     def _on_tab(self, method):
         def run(*_):
             tab = self.tabs.currentWidget()
