@@ -292,6 +292,8 @@ try:
     dlg.close()
     t.close()
     print("sync test passed")
+    from qt_cleanup import finish
+    finish()
 finally:
     host.stdin.close()
     host.wait(timeout=10)

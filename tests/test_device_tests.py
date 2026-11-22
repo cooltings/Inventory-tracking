@@ -191,3 +191,6 @@ backup.restore_backup(db, bk)
 assert db.device_tests(dev)["cam_flash"] == {"result": "Fail", "note": "Torch dead"}
 
 print("device test + report test passed:", TOTAL_STANDARD, "standard tests")
+
+from qt_cleanup import finish  # noqa: E402
+finish()

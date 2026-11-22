@@ -177,3 +177,6 @@ file_menu = next(a.menu() for a in menu.actions() if a.text().replace("&", "") =
 assert any("Backup" in a.text() for a in file_menu.actions())
 win.close()
 print("job lots + SKU + tablet layout test passed")
+
+from qt_cleanup import finish  # noqa: E402
+finish()

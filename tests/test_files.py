@@ -102,3 +102,6 @@ assert choose_backup_file(None, db) == str(out / "my-backup.zip")
 assert restore_with_prompt(None, db, str(out / "my-backup.zip"))
 assert db.get("devices", dev)["model"] == "iPhone 11"
 print("file handling test passed")
+
+from qt_cleanup import finish  # noqa: E402
+finish()

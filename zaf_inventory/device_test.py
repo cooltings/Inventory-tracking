@@ -306,7 +306,7 @@ class TestDialog(QDialog):
             item = self.table.item(row, 2)
             if item is not None:
                 self.table.editItem(item)
-        QTimer.singleShot(0, start)
+        QTimer.singleShot(0, self.table, start)   # dropped if the dialog closes first
 
     def _advance(self, row):
         for r in range(row + 1, self.table.rowCount()):

@@ -158,3 +158,6 @@ assert "listed to sold" in dash.cards["speed"].sub.text(), dash.cards["speed"].s
 assert all(b["brand"] != "(none)" or b["n"] < 140 for b in db.stats()["brands"]), \
     "past-sales totals must not show up as a brand"
 print("listing + adjustments test passed")
+
+from qt_cleanup import finish  # noqa: E402
+finish()

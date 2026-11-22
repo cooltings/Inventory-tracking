@@ -96,3 +96,6 @@ assert counts(db) == original
 
 win.close()
 print("backup/restore test passed:", original)
+
+from qt_cleanup import finish  # noqa: E402
+finish()

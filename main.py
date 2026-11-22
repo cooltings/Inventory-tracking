@@ -46,7 +46,9 @@ def main():
         win.showMaximized()
     else:
         win.show()
-    return app.exec()
+    code = app.exec()
+    del win   # destroy the window while Qt is still running, not during Python's shutdown
+    return code
 
 
 if __name__ == "__main__":

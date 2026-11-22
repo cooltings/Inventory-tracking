@@ -422,6 +422,9 @@ class MainWindow(QMainWindow):
             f"{received.get('updated', 0)} changed, {received.get('deleted', 0)} deleted", 15000)
 
     def closeEvent(self, event):
+        if self.db.conn is None:   # already shut down (Qt can send a second close on exit)
+            event.accept()
+            return
         settings = QSettings(APP_ID, APP_ID)
         settings.setValue("window/geometry", self.saveGeometry())
         settings.setValue("window/tab", self.tabs.currentIndex())

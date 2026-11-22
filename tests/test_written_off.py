@@ -97,3 +97,6 @@ for kind, expect in (("working", "units"), ("faulty", "units"), ("parts", "Stock
     assert "written off" not in text, f"{kind}: {text}"
 
 print("written-off test passed")
+
+from qt_cleanup import finish  # noqa: E402
+finish()
